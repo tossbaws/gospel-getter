@@ -6,25 +6,40 @@
 //! `cargo check` time. These pin that down.
 
 use serde_json::Value;
+use yaml_rust2::{Yaml, YamlLoader};
 
 const TAURI_CONF: &str = include_str!("../tauri.conf.json");
+
 const CARGO_TOML: &str = include_str!("../Cargo.toml");
+
 const PKGBUILD: &str = include_str!("../../packaging/PKGBUILD");
+
 const LIB_RS: &str = include_str!("../src/lib.rs");
+
 const CAPABILITY: &str = include_str!("../capabilities/default.json");
-const DIST_YML: &str = include_str!("../../.github/workflows/dist.yml");
-const CI_YML: &str = include_str!("../../.github/workflows/ci.yml");
+
 const TRUNK_TOML: &str = include_str!("../../Trunk.toml");
+
 const INSTALL_SH: &str = include_str!("../../packaging/install.sh");
+
 const WINDOWS_PACKAGING: &str = include_str!("../../packaging/windows/README.md");
+
 const NSIS_HOOKS: &str = include_str!("../windows-installer-hooks.nsh");
+
 const SIDECAR_CONF: &str = include_str!("../tauri.sidecar.conf.json");
+
 const GITIGNORE: &str = include_str!("../.gitignore");
+
 const CARGO_LOCK: &str = include_str!("../Cargo.lock");
+
 const CLI_CARGO_TOML: &str = include_str!("../cli/Cargo.toml");
+
 const CLI_MAIN_RS: &str = include_str!("../cli/src/main.rs");
+
 const CORE_CARGO_TOML: &str = include_str!("../core/Cargo.toml");
+
 const CORE_CONNECT_RS: &str = include_str!("../core/src/db/connect.rs");
+
 const APP_MAIN_RS: &str = include_str!("../src/main.rs");
 
 /// Crude but sufficient: pull `version = "X.Y.Z"` out of Cargo.toml's
@@ -514,70 +529,409 @@ const APP_PACKAGE: &str = "gospel_getter";
 
 /// What builds the test app in dist.yml, and the artifacts it goes into.
 const TEST_BUILD_STEP: &str = "Build the GUI-check test app";
+
 const TEST_ARTIFACT: &str = "gui-check-test-app-";
+
 /// The jobs that build the test app, beside the linux and windows jobs.
 const LINUX_TEST_APP_JOB: &str = "gui-test-app-linux";
+
 const WINDOWS_TEST_APP_JOB: &str = "gui-test-app-windows";
 
-/// One step of a workflow's job: its job, its name (if it has one) and its
-/// text. Crude, as `cargo_package_version` is, but enough for the shape
-/// these workflows keep: jobs at two spaces, steps at `      - `.
-#[derive(Debug)]
-struct Step {
-    job: String,
+// ---- The workflows, read as YAML
+//
+// The workflow tests read `.github` as trees (yaml-rust2, which keeps a
+// mapping's keys in order, so jobs compare in the order a workflow lists
+// them): their rules are about jobs, steps and keys, so quoting, indenting
+// and comments change nothing they check.
+
+/// The `.github` folder the workflow tests read: this repository's, or the
+/// copy `PACKAGING_CONFIG_GITHUB` names (tests only, to run them against an
+/// edited copy of the workflows).
+fn github_dir() -> std::path::PathBuf {
+    std::env::var_os("PACKAGING_CONFIG_GITHUB").map_or_else(
+        || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github"),
+        std::path::PathBuf::from,
+    )
+}
+
+/// A workflow, or one of the repository's own actions: its name under
+/// `.github` (`workflows/dist.yml`), its text and its tree.
+struct GithubFile {
     name: String,
     text: String,
+    yaml: Yaml,
 }
 
-fn dist_steps() -> Vec<Step> {
-    workflow_steps(DIST_YML)
-}
-
-fn workflow_steps(workflow: &str) -> Vec<Step> {
-    let mut steps: Vec<Step> = Vec::new();
-    let mut job = String::new();
-    let mut in_jobs = false;
-    for line in workflow.lines() {
-        if line == "jobs:" {
-            in_jobs = true;
-            continue;
-        }
-        if !in_jobs {
-            continue;
-        }
-        if line.len() > 2
-            && line.starts_with("  ")
-            && !line.starts_with("   ")
-            && line.trim_end().ends_with(':')
-            && !line.trim_start().starts_with('#')
+/// The repository's workflows and its own actions: every one in their
+/// folders, so a new one is checked too.
+fn github_files() -> Vec<GithubFile> {
+    let github = github_dir();
+    let mut paths = Vec::new();
+    let workflows = std::fs::read_dir(github.join("workflows")).expect(".github/workflows");
+    for entry in workflows {
+        let path = entry.expect("a workflow").path();
+        if path
+            .extension()
+            .is_some_and(|ext| ext == "yml" || ext == "yaml")
         {
-            job = line.trim().trim_end_matches(':').to_string();
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("      - ") {
-            let name = rest
-                .strip_prefix("name: ")
-                .map(|n| n.trim_matches('"').to_string())
-                .unwrap_or_default();
-            steps.push(Step {
-                job: job.clone(),
-                name,
-                text: format!("{line}\n"),
-            });
-            continue;
-        }
-        if let Some(step) = steps.last_mut() {
-            if step.name.is_empty()
-                && let Some(name) = line.trim_start().strip_prefix("name: ")
-                && line.starts_with("        name: ")
-            {
-                step.name = name.trim_matches('"').to_string();
-            }
-            step.text.push_str(line);
-            step.text.push('\n');
+            paths.push((format!("workflows/{}", file_name(&path)), path));
         }
     }
-    steps
+    let actions = std::fs::read_dir(github.join("actions")).expect(".github/actions");
+    for entry in actions {
+        let dir = entry.expect("an action").path();
+        for name in ["action.yml", "action.yaml"] {
+            let path = dir.join(name);
+            if path.is_file() {
+                paths.push((format!("actions/{}/{name}", file_name(&dir)), path));
+            }
+        }
+    }
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|(name, path)| {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let yaml = parse(&text);
+            GithubFile { name, text, yaml }
+        })
+        .collect()
+}
+
+/// One workflow, by its file name (`dist.yml`).
+fn workflow(file: &str) -> GithubFile {
+    let name = format!("workflows/{file}");
+    github_files()
+        .into_iter()
+        .find(|f| f.name == name)
+        .unwrap_or_else(|| panic!("no .github/{name}"))
+}
+
+/// A YAML document's tree.
+fn parse(text: &str) -> Yaml {
+    YamlLoader::load_from_str(text)
+        .unwrap_or_else(|e| panic!("not YAML: {e}\n{text}"))
+        .into_iter()
+        .next()
+        .unwrap_or(Yaml::Null)
+}
+
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// A scalar as text: a string as it is, a number or a boolean as YAML
+/// reads it (`30`, `false`). `None` for a mapping, a sequence or nothing.
+fn scalar(value: &Yaml) -> Option<String> {
+    match value {
+        Yaml::String(s) | Yaml::Real(s) => Some(s.clone()),
+        Yaml::Integer(i) => Some(i.to_string()),
+        Yaml::Boolean(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+/// An `if:` as GitHub reads it: `${{ … }}` around all of it changes nothing.
+fn condition(value: &Yaml) -> Option<String> {
+    let text = scalar(value)?;
+    let trimmed = text.trim();
+    Some(
+        trimmed
+            .strip_prefix("${{")
+            .and_then(|rest| rest.strip_suffix("}}"))
+            .filter(|inner| !inner.contains("${{") && !inner.contains("}}"))
+            .map_or(trimmed, str::trim)
+            .to_owned(),
+    )
+}
+
+/// What a value lists (`needs:`, `types:`): a sequence's items, or a lone
+/// scalar as one.
+fn list(value: &Yaml) -> Vec<String> {
+    match value {
+        Yaml::Array(items) => items.iter().filter_map(scalar).collect(),
+        other => scalar(other).into_iter().collect(),
+    }
+}
+
+/// A mapping's entries, as (key, value).
+fn entries(value: &Yaml) -> Vec<(String, &Yaml)> {
+    value
+        .as_hash()
+        .map(|hash| {
+            hash.iter()
+                .filter_map(|(k, v)| scalar(k).map(|k| (k, v)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A mapping's scalar entries as `key: value`, sorted (a `permissions:`
+/// block, a `with:`), or a lone scalar (`permissions: read-all`) as itself.
+fn grants(value: &Yaml) -> Vec<String> {
+    if let Some(one) = scalar(value) {
+        return vec![one];
+    }
+    let mut grants: Vec<String> = entries(value)
+        .into_iter()
+        .filter_map(|(k, v)| scalar(v).map(|v| format!("{k}: {v}")))
+        .collect();
+    grants.sort();
+    grants
+}
+
+/// Every key and scalar in a tree, whole, in order.
+fn scalars(value: &Yaml) -> Vec<String> {
+    fn walk(value: &Yaml, out: &mut Vec<String>) {
+        match value {
+            Yaml::Hash(hash) => {
+                for (k, v) in hash {
+                    walk(k, out);
+                    walk(v, out);
+                }
+            }
+            Yaml::Array(items) => items.iter().for_each(|item| walk(item, out)),
+            other => out.extend(scalar(other)),
+        }
+    }
+    let mut out = Vec::new();
+    walk(value, &mut out);
+    out
+}
+
+/// [`scalars`], a line each (a `run:` as its lines).
+fn lines(value: &Yaml) -> Vec<String> {
+    scalars(value)
+        .iter()
+        .flat_map(|s| s.lines().map(str::to_owned).collect::<Vec<_>>())
+        .collect()
+}
+
+/// [`lines`] without the shell's comments (a `run:`'s `# …` lines): what
+/// runs or is set.
+fn code(value: &Yaml) -> Vec<String> {
+    lines(value)
+        .into_iter()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect()
+}
+
+/// The value of every mapping entry named `key` in a tree, at any depth.
+fn every<'a>(value: &'a Yaml, key: &str) -> Vec<&'a Yaml> {
+    fn walk<'a>(value: &'a Yaml, key: &str, out: &mut Vec<&'a Yaml>) {
+        match value {
+            Yaml::Hash(hash) => {
+                for (k, v) in hash {
+                    if k.as_str() == Some(key) {
+                        out.push(v);
+                    }
+                    walk(v, key, out);
+                }
+            }
+            Yaml::Array(items) => items.iter().for_each(|item| walk(item, key, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(value, key, &mut out);
+    out
+}
+
+/// A tree on one line (`{uses: …, with: {…}}`), to compare and to show.
+fn flow(value: &Yaml) -> String {
+    match value {
+        Yaml::Hash(hash) => format!(
+            "{{{}}}",
+            hash.iter()
+                .map(|(k, v)| format!("{}: {}", flow(k), flow(v)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Yaml::Array(items) => format!(
+            "[{}]",
+            items.iter().map(flow).collect::<Vec<_>>().join(", ")
+        ),
+        other => scalar(other).unwrap_or_else(|| "~".to_owned()),
+    }
+}
+
+impl GithubFile {
+    /// The workflow's jobs, in order.
+    fn jobs(&self) -> Vec<Job<'_>> {
+        self.yaml["jobs"]
+            .as_hash()
+            .map(|jobs| {
+                jobs.iter()
+                    .filter_map(|(id, yaml)| {
+                        Some(Job {
+                            id: id.as_str()?,
+                            yaml,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn job(&self, id: &str) -> Job<'_> {
+        self.jobs()
+            .into_iter()
+            .find(|job| job.id == id)
+            .unwrap_or_else(|| panic!("{}: no job {id}", self.name))
+    }
+
+    /// Every job's steps, in order.
+    fn steps(&self) -> Vec<Step<'_>> {
+        self.jobs()
+            .into_iter()
+            .flat_map(|job| job.steps())
+            .collect()
+    }
+
+    /// The workflow's own `env:` value for `key` (not a job's or a step's).
+    fn env(&self, key: &str) -> Option<String> {
+        scalar(&self.yaml["env"][key])
+    }
+}
+
+/// A workflow's job, by its id.
+#[derive(Debug, Clone, Copy)]
+struct Job<'a> {
+    id: &'a str,
+    yaml: &'a Yaml,
+}
+
+impl<'a> Job<'a> {
+    fn get(&self, key: &str) -> Option<String> {
+        scalar(&self.yaml[key])
+    }
+
+    fn has(&self, key: &str) -> bool {
+        !self.yaml[key].is_badvalue()
+    }
+
+    fn condition(&self) -> Option<String> {
+        condition(&self.yaml["if"])
+    }
+
+    fn needs(&self) -> Vec<String> {
+        list(&self.yaml["needs"])
+    }
+
+    fn env(&self, key: &str) -> Option<String> {
+        scalar(&self.yaml["env"][key])
+    }
+
+    /// Its environment's name (`environment: release`, or a mapping's
+    /// `name:`).
+    fn environment(&self) -> Option<String> {
+        self.get("environment")
+            .or_else(|| scalar(&self.yaml["environment"]["name"]))
+    }
+
+    fn steps(&self) -> Vec<Step<'a>> {
+        let job = self.id;
+        self.yaml["steps"]
+            .as_vec()
+            .map(|steps| steps.iter().map(|yaml| Step { job, yaml }).collect())
+            .unwrap_or_default()
+    }
+
+    /// Everything it says, a line each ([`lines`]).
+    fn text(&self) -> String {
+        lines(self.yaml).join("\n")
+    }
+
+    /// Its own keys and values, without its steps, a line each.
+    fn own_lines(&self) -> Vec<String> {
+        entries(self.yaml)
+            .into_iter()
+            .filter(|(k, _)| k != "steps")
+            .flat_map(|(k, v)| std::iter::once(k).chain(lines(v)))
+            .collect()
+    }
+}
+
+/// One step of a job.
+#[derive(Debug, Clone, Copy)]
+struct Step<'a> {
+    job: &'a str,
+    yaml: &'a Yaml,
+}
+
+impl Step<'_> {
+    fn name(&self) -> String {
+        self.get("name").unwrap_or_default()
+    }
+
+    fn get(&self, key: &str) -> Option<String> {
+        scalar(&self.yaml[key])
+    }
+
+    fn has(&self, key: &str) -> bool {
+        !self.yaml[key].is_badvalue()
+    }
+
+    /// The action it uses, without the `@` and the ref after it.
+    fn action(&self) -> Option<String> {
+        self.get("uses")
+            .map(|uses| uses.split('@').next().unwrap_or_default().to_owned())
+    }
+
+    fn uploads(&self) -> bool {
+        self.action().as_deref() == Some("actions/upload-artifact")
+    }
+
+    fn downloads(&self) -> bool {
+        self.action().as_deref() == Some("actions/download-artifact")
+    }
+
+    fn run(&self) -> String {
+        self.get("run").unwrap_or_default()
+    }
+
+    /// Its `run:`'s lines, without the shell's comments.
+    fn commands(&self) -> Vec<String> {
+        code(&self.yaml["run"])
+    }
+
+    fn with(&self, key: &str) -> Option<String> {
+        scalar(&self.yaml["with"][key])
+    }
+
+    fn env(&self, key: &str) -> Option<String> {
+        scalar(&self.yaml["env"][key])
+    }
+
+    fn condition(&self) -> Option<String> {
+        condition(&self.yaml["if"])
+    }
+
+    /// Everything it says, a line each ([`lines`]).
+    fn text(&self) -> String {
+        lines(self.yaml).join("\n")
+    }
+
+    /// What it runs or sets ([`code`]).
+    fn code(&self) -> String {
+        code(self.yaml).join("\n")
+    }
+}
+
+/// A job's one step using `action`.
+fn only_step<'a>(job: &Job<'a>, action: &str) -> Step<'a> {
+    let found: Vec<Step<'a>> = job
+        .steps()
+        .into_iter()
+        .filter(|s| s.action().as_deref() == Some(action))
+        .collect();
+    let [step] = found.as_slice() else {
+        panic!("job {}: one {action}: {found:#?}", job.id);
+    };
+    *step
 }
 
 /// The test build can never be a release, or an installer, or anything a
@@ -623,51 +977,58 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
     }
 
     // dist.yml.
-    let steps = dist_steps();
-    assert!(
-        steps
+    let dist = workflow("dist.yml");
+    let steps = dist.steps();
+    let builds_installers = |step: &Step| {
+        step.commands()
             .iter()
-            .filter(|s| s.text.contains("cargo tauri build"))
-            .count()
-            >= 2,
+            .any(|l| l.contains("cargo tauri build"))
+    };
+    assert!(
+        steps.iter().filter(|s| builds_installers(s)).count() >= 2,
         "the installer builds weren't found: {steps:#?}"
     );
+    let installer_artifact = |step: &Step| {
+        step.with("name")
+            .is_some_and(|n| n.starts_with("gospel-getter-"))
+    };
     for step in &steps {
-        if step.text.contains("cargo tauri build") {
+        let text = step.text();
+        if builds_installers(step) {
             assert!(
-                !step.text.contains("--features")
-                    && !step.text.contains("--all-features")
-                    && !step.text.contains(TEST_FEATURE),
+                !text.contains("--features")
+                    && !text.contains("--all-features")
+                    && !text.contains(TEST_FEATURE),
                 "an installer build takes features: {step:#?}"
             );
         }
-        if step.text.contains(TEST_FEATURE) && step.name != TEST_BUILD_STEP {
-            // Only the comment at the top of the workflow, and the GUI
-            // jobs reading the test app, may name it otherwise.
+        if text.contains(TEST_FEATURE) && step.name() != TEST_BUILD_STEP {
+            // Only the GUI jobs, reading the test app, may name it otherwise.
             assert!(
-                !step.text.contains("cargo ") || step.text.contains("scripts/gui-check.sh"),
+                !text.contains("cargo ") || text.contains("scripts/gui-check.sh"),
                 "{TEST_FEATURE} built outside \"{TEST_BUILD_STEP}\": {step:#?}"
             );
         }
-        if step.text.contains("actions/upload-artifact") && step.text.contains("gui-check-test-app")
-        {
+        if step.uploads() && text.contains("gui-check-test-app") {
             assert!(
-                step.text.contains(&format!("name: {TEST_ARTIFACT}")),
+                step.with("name")
+                    .is_some_and(|n| n.starts_with(TEST_ARTIFACT)),
                 "the test app goes into its own artifact: {step:#?}"
             );
         }
-        if step.text.contains("actions/upload-artifact")
-            && step.text.contains("name: gospel-getter-")
-        {
+        if step.uploads() && installer_artifact(step) {
             assert!(
-                !step.text.contains("gui-check-test-app"),
+                !text.contains("gui-check-test-app"),
                 "an installer artifact takes the test app: {step:#?}"
             );
         }
     }
-    let builds: Vec<&Step> = steps.iter().filter(|s| s.name == TEST_BUILD_STEP).collect();
+    let builds: Vec<&Step> = steps
+        .iter()
+        .filter(|s| s.name() == TEST_BUILD_STEP)
+        .collect();
     assert_eq!(
-        builds.iter().map(|s| s.job.as_str()).collect::<Vec<_>>(),
+        builds.iter().map(|s| s.job).collect::<Vec<_>>(),
         [LINUX_TEST_APP_JOB, WINDOWS_TEST_APP_JOB],
         "the test app is built by its own Linux and Windows jobs, once each"
     );
@@ -680,47 +1041,46 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
         ),
     ] {
         // The installer job builds the installers and nothing with features.
-        for step in steps.iter().filter(|s| s.job == build) {
+        for step in dist.job(build).steps() {
+            let text = step.text();
             assert!(
-                !step.text.contains(TEST_FEATURE)
-                    && !step.text.contains(TEST_ARTIFACT)
-                    && !step.text.contains("--features"),
+                !text.contains(TEST_FEATURE)
+                    && !text.contains(TEST_ARTIFACT)
+                    && !text.contains("--features"),
                 "the {build} job builds or uploads the test app again: {step:#?}"
             );
         }
         // Its own job: no installer, no release artifact, only the test app's.
-        let own: Vec<&Step> = steps.iter().filter(|s| s.job == own_job).collect();
+        let own = dist.job(own_job).steps();
         assert!(
-            !own.iter().any(|s| s.text.contains("cargo tauri")),
+            !own.iter().any(|s| s.text().contains("cargo tauri")),
             "{own_job} builds an installer: {own:#?}"
         );
-        let uploads: Vec<Option<&str>> = own
+        let uploads: Vec<Option<String>> = own
             .iter()
-            .filter(|s| s.text.contains("actions/upload-artifact@"))
-            .map(|s| with_value(s, "name"))
+            .filter(|s| s.uploads())
+            .map(|s| s.with("name"))
             .collect();
         assert_eq!(
             uploads,
-            [Some(artifact)],
+            [Some(artifact.to_owned())],
             "{own_job} uploads something other than the test app"
         );
     }
     for build in builds {
         assert!(
-            build.text.contains(&format!(
+            build.run().contains(&format!(
                 "cargo build --release --locked -p {APP_PACKAGE} --features {TEST_FEATURE}"
             )),
             "{build:#?}"
         );
-        let job: Vec<&Step> = steps.iter().filter(|s| s.job == build.job).collect();
+        let job = dist.job(build.job).steps();
         let at = job
             .iter()
-            .position(|s| std::ptr::eq(*s, build))
+            .position(|s| s.name() == TEST_BUILD_STEP)
             .expect("the build step is in its job");
         for (i, step) in job.iter().enumerate() {
-            if step.text.contains("actions/upload-artifact")
-                && step.text.contains("name: gospel-getter-")
-            {
+            if step.uploads() && installer_artifact(step) {
                 assert!(
                     i < at,
                     "job {}: an installer is uploaded after the test app is built: {step:#?}",
@@ -762,22 +1122,20 @@ fn the_windows_test_app_is_built_beside_the_installers_from_their_cache() {
 /// A test-app job (`own`) beside its installer job (`build`), as the tests
 /// above say, for the GUI job that runs both.
 fn test_app_is_built_beside(own_job: &str, build: &str, gui: &str, runs_on: &str) {
-    let keys = dist_job_keys(gui);
-    assert!(
-        keys.contains(&format!("needs: [{build}, {own_job}]").as_str()),
-        "{gui} should wait for the installers and the test app: {keys:#?}"
+    let dist = workflow("dist.yml");
+    assert_eq!(
+        dist.job(gui).needs(),
+        [build, own_job],
+        "{gui} should wait for the installers and the test app"
     );
 
-    let own = dist_job_keys(own_job);
-    let linux = dist_job_keys(build);
-    let key = |keys: &[&'static str], key: &str| -> Option<&'static str> {
-        let prefix = format!("{key}: ");
-        keys.iter().find_map(|k| k.strip_prefix(prefix.as_str()))
-    };
-    assert_eq!(key(&own, "runs-on"), Some(runs_on), "{own:#?}");
-    assert_eq!(key(&own, "runs-on"), key(&linux, "runs-on"));
-    assert_eq!(key(&own, "needs"), None, "it runs beside the {build} job");
-    let name = key(&own, "name").unwrap_or_else(|| panic!("no name: {own:#?}"));
+    let (own, installers) = (dist.job(own_job), dist.job(build));
+    assert_eq!(own.get("runs-on").as_deref(), Some(runs_on), "{own:#?}");
+    assert_eq!(own.get("runs-on"), installers.get("runs-on"));
+    assert!(own.needs().is_empty(), "it runs beside the {build} job");
+    let name = own
+        .get("name")
+        .unwrap_or_else(|| panic!("no name: {own:#?}"));
     assert!(!name.contains("${{"), "{name}");
     for required in [
         "Linux (AppImage + deb)",
@@ -790,85 +1148,48 @@ fn test_app_is_built_beside(own_job: &str, build: &str, gui: &str, runs_on: &str
         );
     }
 
-    let steps = dist_steps();
-    let step = |job: &str, uses: &str| -> &Step {
-        let found: Vec<&Step> = steps
-            .iter()
-            .filter(|s| s.job == job && s.text.contains(uses))
-            .collect();
-        assert_eq!(found.len(), 1, "job {job}: {uses}: {found:#?}");
-        found[0]
-    };
-    // The step's own lines: the comments after it are the next step's.
-    let code = |step: &Step| -> Vec<String> {
-        step.text
-            .lines()
-            .filter(|l| !l.trim_start().starts_with('#'))
-            .map(str::to_owned)
-            .collect()
-    };
-    let rust = "uses: dtolnay/rust-toolchain@";
+    let rust = "dtolnay/rust-toolchain";
     assert_eq!(
-        code(step(own_job, rust)),
-        code(step(build, rust)),
+        flow(only_step(&own, rust).yaml),
+        flow(only_step(&installers, rust).yaml),
         "another Rust install misses the {build} job's cache"
     );
-    let cache = "uses: Swatinem/rust-cache@";
-    let (own_cache, linux_cache) = (step(own_job, cache), step(build, cache));
-    assert_eq!(with_value(own_cache, "shared-key"), Some(build));
+    let cache = "Swatinem/rust-cache";
+    let (own_cache, build_cache) = (only_step(&own, cache), only_step(&installers, cache));
+    assert_eq!(own_cache.with("shared-key").as_deref(), Some(build));
     assert_eq!(
-        with_value(linux_cache, "shared-key"),
+        build_cache.with("shared-key").as_deref(),
         Some(build),
         "the {build} job's key would change"
     );
     assert_eq!(
-        with_value(own_cache, "save-if"),
+        own_cache.with("save-if").as_deref(),
         Some("false"),
         "{own_job} saves a cache entry of its own"
     );
     assert_eq!(
-        with_value(linux_cache, "save-if"),
+        build_cache.with("save-if").as_deref(),
         Some("${{ github.ref == 'refs/heads/main' }}")
     );
-    for cache in [own_cache, linux_cache] {
-        assert_eq!(with_value(cache, "key"), None, "{cache:#?}");
+    for cache in [own_cache, build_cache] {
+        assert_eq!(cache.with("key"), None, "{cache:#?}");
     }
-    // The block under `workspaces: |`, a line each.
+    // `workspaces:`, a line each.
     let workspaces = |step: &Step| -> Vec<String> {
-        step.text
+        step.with("workspaces")
+            .unwrap_or_default()
             .lines()
-            .skip_while(|l| *l != "          workspaces: |")
-            .skip(1)
-            .take_while(|l| l.starts_with("            "))
-            .map(|l| l.trim().to_owned())
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
             .collect()
     };
-    assert_eq!(workspaces(linux_cache), ["src-tauri", "ui-leptos"]);
+    assert_eq!(workspaces(&build_cache), ["src-tauri", "ui-leptos"]);
     assert_eq!(
-        workspaces(own_cache),
-        workspaces(linux_cache),
+        workspaces(&own_cache),
+        workspaces(&build_cache),
         "other workspaces miss the {build} job's cache"
     );
-}
-
-/// A dist.yml job's own keys (`name:`, `if:`, `needs:` and so on), up to its
-/// `steps:`, trimmed, without comments or what's nested under them.
-fn dist_job_keys(job: &str) -> Vec<&'static str> {
-    job_keys(DIST_YML, job)
-}
-
-/// A workflow job's own keys, as for [`dist_job_keys`].
-fn job_keys<'a>(workflow: &'a str, job: &str) -> Vec<&'a str> {
-    let header = format!("  {job}:");
-    workflow
-        .lines()
-        .skip_while(|l| *l != header)
-        .skip(1)
-        .take_while(|l| *l != "    steps:")
-        .filter(|l| l.starts_with("    ") && !l.starts_with("     "))
-        .map(str::trim)
-        .filter(|l| !l.starts_with('#'))
-        .collect()
 }
 
 /// What a run for a pull request label other than `ci:full` skips: the
@@ -879,19 +1200,19 @@ const LABEL_GATE: &str = "github.event.action != 'labeled' || github.event.label
 /// after the merge (`gh workflow run dist.yml`), which joined the same
 /// concurrency group as the merge's push run and cancelled it: a red X on
 /// every release commit. So the push of a release-prep merge builds nothing,
-/// and a dispatched run never cancels the run in progress (it is now a group
-/// of its own, too: `a_push_never_cancels_a_dispatched_run`). Pull requests
-/// (a release/ branch's too) and other pushes build as before; so does a
+/// and a dispatched run never cancels the run in progress (it is a group of
+/// its own, too: `a_push_never_cancels_a_dispatched_run`). Pull requests (a
+/// release/ branch's too) and other pushes build as before; so does a
 /// dispatched run. The only other run that skips the builds is one for a
 /// pull request label other than `ci:full` ([`LABEL_GATE`]).
 #[test]
 fn a_release_merge_never_cancels_its_own_build() {
+    let dist = workflow("dist.yml");
     for job in ["linux", LINUX_TEST_APP_JOB, "windows"] {
-        let keys = dist_job_keys(job);
-        let condition = keys
-            .iter()
-            .find_map(|k| k.strip_prefix("if: "))
-            .unwrap_or_else(|| panic!("job {job} has no `if:`: {keys:#?}"));
+        let condition = dist
+            .job(job)
+            .condition()
+            .unwrap_or_else(|| panic!("job {job} has no `if:`"));
         assert_eq!(
             condition,
             format!(
@@ -903,17 +1224,8 @@ fn a_release_merge_never_cancels_its_own_build() {
         );
     }
 
-    let concurrency: Vec<&str> = DIST_YML
-        .lines()
-        .skip_while(|l| *l != "concurrency:")
-        .skip(1)
-        .take_while(|l| l.starts_with("  "))
-        .map(str::trim)
-        .collect();
-    let cancel = concurrency
-        .iter()
-        .find_map(|l| l.strip_prefix("cancel-in-progress: "))
-        .unwrap_or_else(|| panic!("no cancel-in-progress: {concurrency:#?}"));
+    let cancel = scalar(&dist.yaml["concurrency"]["cancel-in-progress"])
+        .expect("dist.yml's concurrency has a cancel-in-progress");
     assert_ne!(
         cancel, "true",
         "a dispatched run would cancel the run in progress on its commit"
@@ -929,6 +1241,7 @@ fn a_release_merge_never_cancels_its_own_build() {
 /// tauri-build wants a sidecar's file there on every build it's named for, and
 /// `cargo build` and `cargo test` come before the file does.
 const SIDECAR: &str = "binaries/gospel-getter-cli";
+
 const SIDECAR_STEP: &str = "Build the CLI sidecar";
 
 #[test]
@@ -957,14 +1270,14 @@ fn the_sidecar_is_named_in_its_overlay_alone() {
 /// sidecar: on its own, without features, from the lock file.
 #[test]
 fn every_installer_build_carries_the_sidecar() {
-    let steps = dist_steps();
+    let dist = workflow("dist.yml");
     for job in ["linux", "windows"] {
-        let job_steps: Vec<&Step> = steps.iter().filter(|s| s.job == job).collect();
-        let built_at = job_steps
+        let steps = dist.job(job).steps();
+        let built_at = steps
             .iter()
-            .position(|s| s.name == SIDECAR_STEP)
+            .position(|s| s.name() == SIDECAR_STEP)
             .unwrap_or_else(|| panic!("job {job} has no \"{SIDECAR_STEP}\" step"));
-        let build = &job_steps[built_at].text;
+        let build = steps[built_at].run();
         assert!(
             build.contains("cargo build --release --locked -p gospel-getter-cli"),
             "{build}"
@@ -972,10 +1285,10 @@ fn every_installer_build_carries_the_sidecar() {
         assert!(!build.contains("--features"), "{build}");
         assert!(build.contains("binaries/gospel-getter-cli-"), "{build}");
         let mut installer_builds = 0;
-        for (at, step) in job_steps.iter().enumerate() {
+        for (at, step) in steps.iter().enumerate() {
             for line in step
-                .text
-                .lines()
+                .commands()
+                .iter()
                 .filter(|l| l.trim_start().starts_with("cargo tauri build"))
             {
                 installer_builds += 1;
@@ -996,16 +1309,16 @@ fn every_installer_build_carries_the_sidecar() {
 /// dist.yml's header).
 #[test]
 fn every_app_build_builds_only_the_app() {
-    let steps = dist_steps();
+    let dist = workflow("dist.yml");
     let mut installers = Vec::new();
     let mut test_apps = Vec::new();
-    for step in &steps {
-        for line in step.text.lines().map(str::trim_start) {
-            let line = line.strip_prefix("run: ").unwrap_or(line);
+    for step in dist.steps() {
+        for line in step.commands() {
+            let line = line.trim_start().to_owned();
             if line.starts_with("cargo tauri build") {
-                installers.push((step.job.as_str(), line));
-            } else if step.name == TEST_BUILD_STEP && line.starts_with("cargo build") {
-                test_apps.push((step.job.as_str(), line));
+                installers.push((step.job, line));
+            } else if step.name() == TEST_BUILD_STEP && line.starts_with("cargo build") {
+                test_apps.push((step.job, line));
             }
         }
     }
@@ -1038,7 +1351,7 @@ fn every_app_build_builds_only_the_app() {
 /// own too, from the job that built it.
 #[test]
 fn the_cli_is_also_uploaded_on_its_own() {
-    let steps = dist_steps();
+    let dist = workflow("dist.yml");
     for (job, artifact, file) in [
         (
             "linux",
@@ -1051,29 +1364,35 @@ fn the_cli_is_also_uploaded_on_its_own() {
             "src-tauri/binaries/gospel-getter-cli-x86_64-pc-windows-msvc.exe",
         ),
     ] {
-        let uploads: Vec<&Step> = steps
-            .iter()
-            .filter(|s| s.job == job && s.text.contains(&format!("name: {artifact}\n")))
+        let uploads: Vec<Step> = dist
+            .job(job)
+            .steps()
+            .into_iter()
+            .filter(|s| s.with("name").as_deref() == Some(artifact))
             .collect();
         assert_eq!(uploads.len(), 1, "job {job} uploads {artifact} once");
-        let upload = &uploads[0].text;
-        assert!(upload.contains("actions/upload-artifact"), "{upload}");
-        assert!(upload.contains(&format!("path: {file}\n")), "{upload}");
-        assert!(upload.contains("if-no-files-found: error"), "{upload}");
+        let upload = &uploads[0];
+        assert!(upload.uploads(), "{upload:#?}");
+        assert_eq!(upload.with("path").as_deref(), Some(file), "{upload:#?}");
+        assert_eq!(
+            upload.with("if-no-files-found").as_deref(),
+            Some("error"),
+            "{upload:#?}"
+        );
     }
 }
 
 /// Each kind of installer is checked for it, once installed.
 #[test]
 fn the_smoke_tests_check_the_sidecar_is_there() {
-    let steps = dist_steps();
+    let dist = workflow("dist.yml");
     let smoke = |job: &str, name: &str| -> String {
-        steps
-            .iter()
-            .find(|s| s.job == job && s.name.contains(name))
+        dist.job(job)
+            .steps()
+            .into_iter()
+            .find(|s| s.name().contains(name))
             .unwrap_or_else(|| panic!("no {name} step in {job}"))
-            .text
-            .clone()
+            .run()
     };
     assert!(smoke("linux", "AppImage extracts").contains("usr/bin/gospel-getter-cli --version"));
     let deb = smoke("linux", ".deb installs");
@@ -1259,72 +1578,39 @@ fn the_windows_gui_checks_launch_the_app_by_its_name() {
         .and_then(|rest| rest.strip_suffix('"'))
         .expect("Cargo.toml's [package] name");
     let exe = format!("{package}.exe");
-    let keys = dist_job_keys("gui-windows");
-    let env_line = format!("GUI_EXE: {exe}");
-    assert!(
-        DIST_YML.lines().any(|l| l.trim() == env_line),
-        "gui-windows should name the app's program, {exe}: {keys:#?}"
+    let dist = workflow("dist.yml");
+    let gui = dist.job("gui-windows");
+    assert_eq!(
+        gui.env("GUI_EXE").as_deref(),
+        Some(exe.as_str()),
+        "gui-windows should name the app's program, {exe}"
     );
-    let steps = dist_steps();
-    let install = steps
-        .iter()
-        .find(|s| s.job == "gui-windows" && s.name.starts_with("Install the app"))
+    let install = gui
+        .steps()
+        .into_iter()
+        .find(|s| s.name().starts_with("Install the app"))
         .expect("gui-windows installs the app");
-    assert!(install.text.contains("$env:GUI_EXE"), "{install:#?}");
+    let run = install.run();
+    assert!(run.contains("$env:GUI_EXE"), "{install:#?}");
     assert!(
-        !install
-            .text
-            .lines()
+        !run.lines()
             .skip_while(|l| !l.contains("$location"))
             .any(|l| l.contains("Select-Object -First 1")),
         "the app's program is picked by the folder's order: {install:#?}"
     );
     for name in ["gospel-getter-cli.exe", "uninstall.exe"] {
-        assert!(
-            install.text.contains(name),
-            "{name} isn't known: {install:#?}"
-        );
+        assert!(run.contains(name), "{name} isn't known: {install:#?}");
     }
-    let test_app = steps
-        .iter()
-        .find(|s| s.job == WINDOWS_TEST_APP_JOB && s.name == TEST_BUILD_STEP)
+    let test_app = dist
+        .job(WINDOWS_TEST_APP_JOB)
+        .steps()
+        .into_iter()
+        .find(|s| s.name() == TEST_BUILD_STEP)
         .expect("gui-test-app-windows builds the test app");
     assert!(
-        test_app.text.contains(&format!("target/release/{exe}")),
+        test_app.run().contains(&format!("target/release/{exe}")),
         "{test_app:#?}"
     );
-}
-
-/// The repository's workflows and its own actions, as (file name, text):
-/// every one in their folders, so a new one is checked too.
-fn github_files() -> Vec<(String, String)> {
-    let github = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github");
-    let read = |path: &std::path::Path| {
-        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-    };
-    let mut files = Vec::new();
-    let workflows = std::fs::read_dir(github.join("workflows")).expect(".github/workflows");
-    for entry in workflows {
-        let path = entry.expect("a workflow").path();
-        if path
-            .extension()
-            .is_some_and(|ext| ext == "yml" || ext == "yaml")
-        {
-            files.push((format!("workflows/{}", file_name(&path)), read(&path)));
-        }
-    }
-    let actions = std::fs::read_dir(github.join("actions")).expect(".github/actions");
-    for entry in actions {
-        let dir = entry.expect("an action").path();
-        for name in ["action.yml", "action.yaml"] {
-            let path = dir.join(name);
-            if path.is_file() {
-                files.push((format!("actions/{}/{name}", file_name(&dir)), read(&path)));
-            }
-        }
-    }
-    files.sort();
-    files
 }
 
 /// GitHub expressions treat '' as false, so `a && '' || b` always gives b:
@@ -1341,9 +1627,9 @@ fn no_workflow_expression_has_an_empty_and_branch() {
         assert_eq!(has_empty_and_branch(expression), empty, "{expression}");
     }
     let mut seen = Vec::new();
-    for (file, text) in github_files() {
-        for expression in workflow_expressions(&text) {
-            seen.push((file.clone(), expression));
+    for file in github_files() {
+        for expression in workflow_expressions(&file.yaml) {
+            seen.push((file.name.clone(), expression));
         }
     }
     assert!(
@@ -1361,21 +1647,21 @@ fn no_workflow_expression_has_an_empty_and_branch() {
     );
 }
 
-/// Every expression in a workflow or action: each `${{ … }}`, across lines,
-/// and each bare `if:` value.
-fn workflow_expressions(text: &str) -> Vec<String> {
+/// Every expression in a workflow or action: each `${{ … }}` in a key or a
+/// value, and each bare `if:`, which GitHub reads as one.
+fn workflow_expressions(yaml: &Yaml) -> Vec<String> {
     let mut expressions = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("${{") {
-        let after = &rest[start + 3..];
-        let Some(end) = after.find("}}") else { break };
-        expressions.push(after[..end].trim().to_owned());
-        rest = &after[end + 2..];
+    for text in scalars(yaml) {
+        let mut rest = text.as_str();
+        while let Some(start) = rest.find("${{") {
+            let after = &rest[start + 3..];
+            let Some(end) = after.find("}}") else { break };
+            expressions.push(after[..end].trim().to_owned());
+            rest = &after[end + 2..];
+        }
     }
-    for line in text.lines() {
-        if let Some(value) = line.trim_start().strip_prefix("if: ")
-            && !value.contains("${{")
-        {
+    for value in every(yaml, "if").into_iter().filter_map(scalar) {
+        if !value.contains("${{") {
             expressions.push(value.trim().to_owned());
         }
     }
@@ -1418,65 +1704,6 @@ fn has_empty_and_branch(expression: &str) -> bool {
     false
 }
 
-fn file_name(path: &std::path::Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
-/// A workflow's jobs, as (id, text): from each `  id:` under `jobs:` to the
-/// next.
-fn workflow_jobs(workflow: &str) -> Vec<(String, String)> {
-    let mut jobs: Vec<(String, String)> = Vec::new();
-    let mut in_jobs = false;
-    for line in workflow.lines() {
-        if line == "jobs:" {
-            in_jobs = true;
-            continue;
-        }
-        if !in_jobs {
-            continue;
-        }
-        if line.len() > 2
-            && line.starts_with("  ")
-            && !line.starts_with("   ")
-            && line.trim_end().ends_with(':')
-            && !line.trim_start().starts_with('#')
-        {
-            jobs.push((line.trim().trim_end_matches(':').to_owned(), String::new()));
-            continue;
-        }
-        if let Some((_, text)) = jobs.last_mut() {
-            text.push_str(line);
-            text.push('\n');
-        }
-    }
-    jobs
-}
-
-/// A `permissions:` block at `indent` in `text` (a workflow's own at "", a
-/// job's at four spaces in its [`workflow_jobs`] text), as its trimmed
-/// lines, or the one value of `permissions: write-all` and the like.
-fn permissions_at(text: &str, indent: &str) -> Option<Vec<String>> {
-    let mut lines = text.lines();
-    let first = lines.find(|l| {
-        l.strip_prefix(indent)
-            .is_some_and(|rest| rest.starts_with("permissions:"))
-    })?;
-    let value = first[indent.len() + "permissions:".len()..].trim();
-    if !value.is_empty() {
-        return Some(vec![value.to_owned()]);
-    }
-    let inner = format!("{indent}  ");
-    Some(
-        lines
-            .take_while(|l| l.starts_with(&inner))
-            .map(|l| l.trim().to_owned())
-            .filter(|l| !l.starts_with('#'))
-            .collect(),
-    )
-}
-
 /// Every workflow's token reads only, unless a job needs more (F-08). Each
 /// workflow declares its own top-level `permissions:`, since without one
 /// the token gets the repository's default, which can be write access to
@@ -1499,26 +1726,27 @@ fn every_workflow_declares_its_token_and_writes_only_where_listed() {
     ];
     let mut wrong = Vec::new();
     let mut writes = Vec::new();
-    for (file, text) in github_files() {
-        if !file.starts_with("workflows/") {
+    for file in github_files() {
+        if !file.name.starts_with("workflows/") {
             continue;
         }
-        let Some(own) = permissions_at(&text, "") else {
-            wrong.push(format!("{file} declares no top-level permissions:"));
+        let own = &file.yaml["permissions"];
+        if own.is_badvalue() {
+            wrong.push(format!("{} declares no top-level permissions:", file.name));
             continue;
-        };
-        let mut blocks = vec![(String::new(), own)];
-        for (job, body) in workflow_jobs(&text) {
-            if let Some(grants) = permissions_at(&body, "    ") {
-                blocks.push((job, grants));
+        }
+        let mut blocks = vec![(String::new(), grants(own))];
+        for job in file.jobs() {
+            if job.has("permissions") {
+                blocks.push((job.id.to_owned(), grants(&job.yaml["permissions"])));
             }
         }
         for (job, grants) in blocks {
             for grant in grants {
                 if grant.contains("write-all") {
-                    wrong.push(format!("{file} {job:?}: {grant}"));
+                    wrong.push(format!("{} {job:?}: {grant}", file.name));
                 } else if grant.ends_with(": write") {
-                    writes.push((file.clone(), job.clone(), grant));
+                    writes.push((file.name.clone(), job.clone(), grant));
                 }
             }
         }
@@ -1537,37 +1765,27 @@ fn every_workflow_declares_its_token_and_writes_only_where_listed() {
 }
 
 /// Every action a workflow or the repository's own action uses is pinned to
-/// a commit, not a tag or branch that can be moved under it (D-01), with
-/// the release it is in a comment, which Dependabot keeps up to date
-/// (`.github/dependabot.yml`). The repository's own actions (`./…`) are
-/// the commit's own. dtolnay/rust-toolchain has no releases, only branches:
-/// its comment says which.
+/// a commit, not a tag or branch that can be moved under it (D-01).
+/// Dependabot keeps the pins up to date (`.github/dependabot.yml`), with the
+/// release each is in as a comment after it, for the reader. The
+/// repository's own actions (`./…`) are the commit's own.
 #[test]
 fn every_action_is_pinned_to_a_commit() {
     let files = github_files();
     assert!(
-        files.iter().any(|(f, _)| f == "workflows/dist.yml")
-            && files.iter().any(|(f, _)| f.starts_with("actions/")),
+        files.iter().any(|f| f.name == "workflows/dist.yml")
+            && files.iter().any(|f| f.name.starts_with("actions/")),
         "{:?}",
-        files.iter().map(|(f, _)| f).collect::<Vec<_>>()
+        files.iter().map(|f| &f.name).collect::<Vec<_>>()
     );
     let mut pinned = 0;
-    for (file, text) in &files {
-        for (at, line) in text.lines().enumerate() {
-            let key = line.trim_start();
-            let key = key.strip_prefix("- ").unwrap_or(key);
-            let Some(uses) = key.strip_prefix("uses:") else {
-                continue;
-            };
-            let uses = uses.trim();
+    for file in &files {
+        for uses in every(&file.yaml, "uses").into_iter().filter_map(scalar) {
             if uses.starts_with("./") {
                 continue;
             }
-            let place = format!("{file}:{}: {}", at + 1, line.trim());
-            let (action, comment) = uses
-                .split_once(" # ")
-                .unwrap_or_else(|| panic!("{place}: no comment naming its release"));
-            let (name, commit) = action
+            let place = format!("{}: uses: {uses}", file.name);
+            let (_, commit) = uses
                 .split_once('@')
                 .unwrap_or_else(|| panic!("{place}: not pinned"));
             assert!(
@@ -1577,17 +1795,6 @@ fn every_action_is_pinned_to_a_commit() {
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
                 "{place}: pinned to `{commit}`, not a full commit SHA"
             );
-            if name != "dtolnay/rust-toolchain" {
-                let release = comment.trim().strip_prefix('v').unwrap_or_default();
-                let parts: Vec<&str> = release.split('.').collect();
-                assert!(
-                    parts.len() == 3
-                        && parts
-                            .iter()
-                            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
-                    "{place}: the comment should name its release, as `# vX.Y.Z`"
-                );
-            }
             pinned += 1;
         }
     }
@@ -1603,31 +1810,31 @@ fn every_action_is_pinned_to_a_commit() {
 /// Only that each is there: the values are the workflows' to choose.
 #[test]
 fn every_job_has_a_time_limit_and_apt_retries() {
-    let workflows: Vec<(String, String)> = github_files()
+    let workflows: Vec<GithubFile> = github_files()
         .into_iter()
-        .filter(|(file, _)| file.starts_with("workflows/"))
+        .filter(|f| f.name.starts_with("workflows/"))
         .collect();
     assert!(
-        workflows.iter().any(|(f, _)| f == "workflows/dist.yml"),
+        workflows.iter().any(|f| f.name == "workflows/dist.yml"),
         "{:?}",
-        workflows.iter().map(|(f, _)| f).collect::<Vec<_>>()
+        workflows.iter().map(|f| &f.name).collect::<Vec<_>>()
     );
     let mut apt = 0;
-    for (file, text) in &workflows {
-        let jobs = workflow_jobs(text);
-        assert!(!jobs.is_empty(), "{file} has no jobs");
-        for (job, _) in &jobs {
-            let keys = job_keys(text, job);
+    for file in &workflows {
+        let jobs = file.jobs();
+        assert!(!jobs.is_empty(), "{} has no jobs", file.name);
+        for job in &jobs {
             assert!(
-                keys.iter().any(|k| k.starts_with("timeout-minutes: ")),
-                "{file}: job {job} has no timeout-minutes: {keys:#?}"
+                job.has("timeout-minutes"),
+                "{}: job {} has no timeout-minutes",
+                file.name,
+                job.id
             );
         }
-        for step in workflow_steps(text) {
-            let installs: Vec<&str> = step
-                .text
-                .lines()
-                .filter(|l| !l.trim_start().starts_with('#'))
+        for step in file.steps() {
+            let installs: Vec<String> = step
+                .commands()
+                .into_iter()
                 .filter(|l| l.contains("apt-get update") || l.contains("apt-get install"))
                 .collect();
             if installs.is_empty() {
@@ -1637,16 +1844,16 @@ fn every_job_has_a_time_limit_and_apt_retries() {
                 assert!(
                     line.contains(" -o Acquire::Retries=")
                         && line.contains(" -o Acquire::http::Timeout="),
-                    "{file}: job {}: apt-get without its retries: {line}",
+                    "{}: job {}: apt-get without its retries: {line}",
+                    file.name,
                     step.job
                 );
                 apt += 1;
             }
             assert!(
-                step.text
-                    .lines()
-                    .any(|l| l.starts_with("        timeout-minutes: ")),
-                "{file}: job {}: the step running apt-get has no timeout-minutes of its own: {step:#?}",
+                step.has("timeout-minutes"),
+                "{}: job {}: the step running apt-get has no timeout-minutes of its own: {step:#?}",
+                file.name,
                 step.job
             );
         }
@@ -1664,46 +1871,46 @@ fn every_job_has_a_time_limit_and_apt_retries() {
 /// hand).
 #[test]
 fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
-    let steps = dist_steps();
+    let dist = workflow("dist.yml");
     for job in ["gui-linux", "gui-windows"] {
-        let keys = job_keys(DIST_YML, job);
-        assert!(keys.contains(&"env:"), "job {job} has no env: {keys:#?}");
-        let body = workflow_jobs(DIST_YML)
-            .into_iter()
-            .find(|(id, _)| id == job)
-            .map(|(_, body)| body)
-            .unwrap_or_else(|| panic!("no job {job}"));
-        assert!(
-            body.lines().any(|l| l == "      GUI_CHECK_RETRY: \"1\""),
+        let gui = dist.job(job);
+        assert_eq!(
+            gui.env("GUI_CHECK_RETRY").as_deref(),
+            Some("1"),
             "job {job} doesn't retry the suite"
         );
+        let steps = gui.steps();
         let run = steps
             .iter()
-            .find(|s| s.job == job && s.text.contains("scripts/gui-check.sh"))
+            .find(|s| s.run().contains("scripts/gui-check.sh"))
             .unwrap_or_else(|| panic!("job {job} doesn't run the checks"));
         let out = run
-            .text
-            .lines()
-            .find_map(|l| l.split_once("scripts/gui-check.sh ").map(|(_, rest)| rest))
+            .commands()
+            .iter()
+            .find_map(|l| {
+                l.split_once("scripts/gui-check.sh ")
+                    .map(|(_, rest)| rest.to_owned())
+            })
             .expect("the checks' arguments");
         assert!(out.contains("/gui-check\""), "job {job}: {out}");
         let upload = steps
             .iter()
-            .find(|s| s.job == job && s.text.contains("actions/upload-artifact@"))
+            .find(|s| s.uploads())
             .unwrap_or_else(|| panic!("job {job} uploads nothing"));
         assert_eq!(
-            with_value(upload, "path"),
+            upload.with("path").as_deref(),
             Some("${{ runner.temp }}/gui-check"),
             "job {job} uploads the whole out-dir, attempt-1/ too"
         );
-        assert!(
-            upload.text.contains("        if: always()\n"),
+        assert_eq!(
+            upload.condition().as_deref(),
+            Some("always()"),
             "{upload:#?}"
         );
     }
-    for (file, text) in github_files() {
+    for file in github_files() {
         for name in ["force-fail", "GUI_CHECK_FORCE_FAIL", "GUI_CHECK_REPEAT"] {
-            assert!(!text.contains(name), "{file} names {name}");
+            assert!(!file.text.contains(name), "{} names {name}", file.name);
         }
     }
 }
@@ -1716,114 +1923,114 @@ fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
 /// repository's 10 GB. cache-cleanup.yml deletes a pull request's caches when
 /// it closes, and main's superseded ones after main's CI and Distribution
 /// runs (or by hand), with a token that can manage caches and read the
-/// repository, nothing else: the job for main's checks out tools/ci alone, for the script that says
-/// which, without keeping the token, and the pull request's job checks out
-/// nothing.
+/// repository, nothing else: the job for main's checks out tools/ci alone, for
+/// the script that says which, without keeping the token, and the pull
+/// request's job checks out nothing.
 #[test]
 fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
     const ON_MAIN: &str = "github.ref == 'refs/heads/main'";
     let mut caches = 0;
-    for (file, text) in github_files() {
-        for step in workflow_steps(&text) {
-            if !step.text.contains("uses: Swatinem/rust-cache@") {
+    for file in github_files() {
+        for step in file.steps() {
+            if step.action().as_deref() != Some("Swatinem/rust-cache") {
                 continue;
             }
             caches += 1;
-            let save = with_value(&step, "save-if")
-                .unwrap_or_else(|| panic!("{file}: job {}: no save-if: {step:#?}", step.job));
+            let save = step.with("save-if").unwrap_or_else(|| {
+                panic!("{}: job {}: no save-if: {step:#?}", file.name, step.job)
+            });
             if save == "false" {
                 continue;
             }
             assert!(
                 save.starts_with("${{ ") && save.ends_with(" }}") && save.contains(ON_MAIN),
-                "{file}: job {}: saves off main: {save}",
+                "{}: job {}: saves off main: {save}",
+                file.name,
                 step.job
             );
-            assert!(!save.contains("||"), "{file}: job {}: {save}", step.job);
+            assert!(
+                !save.contains("||"),
+                "{}: job {}: {save}",
+                file.name,
+                step.job
+            );
         }
     }
     assert!(caches > 0, "no rust-cache steps found");
 
-    let (_, cleanup) = github_files()
-        .into_iter()
-        .find(|(file, _)| file == "workflows/cache-cleanup.yml")
-        .expect("workflows/cache-cleanup.yml");
-    let on: Vec<&str> = cleanup
-        .lines()
-        .skip_while(|l| *l != "on:")
-        .skip(1)
-        .take_while(|l| l.starts_with(' '))
-        .map(str::trim)
-        .collect();
+    let cleanup = workflow("cache-cleanup.yml");
     assert_eq!(
-        on,
-        [
-            "pull_request:",
-            "types: [closed]",
-            "workflow_run:",
-            "workflows: [CI, Distribution Artifacts]",
-            "types: [completed]",
-            "branches: [main]",
-            "workflow_dispatch:",
-            "inputs:",
-            "dry-run:",
-            "description: \"Only list the caches it would delete\"",
-            "type: boolean",
-            "default: false",
-        ]
+        flow(&cleanup.yaml["on"]),
+        flow(&parse(
+            "pull_request:
+  types: [closed]
+workflow_run:
+  workflows: [CI, Distribution Artifacts]
+  types: [completed]
+  branches: [main]
+workflow_dispatch:
+  inputs:
+    dry-run:
+      description: Only list the caches it would delete
+      type: boolean
+      default: false
+"
+        )),
+        "cache-cleanup.yml's triggers"
     );
-    let permissions: Vec<&str> = cleanup
-        .lines()
-        .skip_while(|l| *l != "permissions:")
-        .skip(1)
-        .take_while(|l| l.starts_with(' '))
-        .map(str::trim)
-        .collect();
-    assert_eq!(permissions, ["actions: write", "contents: read"]);
+    assert_eq!(
+        grants(&cleanup.yaml["permissions"]),
+        ["actions: write", "contents: read"]
+    );
+    let text = lines(&cleanup.yaml).join("\n");
     assert!(
-        cleanup.contains("refs/pull/${{ github.event.pull_request.number }}/merge")
-            && cleanup.contains("gh cache delete"),
-        "{cleanup}"
+        text.contains("refs/pull/${{ github.event.pull_request.number }}/merge")
+            && text.contains("gh cache delete"),
+        "{text}"
     );
-    let jobs = workflow_jobs(&cleanup);
+    let jobs = cleanup.jobs();
     assert_eq!(
-        jobs.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+        jobs.iter().map(|job| job.id).collect::<Vec<_>>(),
         ["delete-caches", "delete-superseded"]
     );
-    for (id, body) in &jobs {
-        assert!(
-            !body.contains("permissions:"),
-            "a job asks for more: {body}"
-        );
+    for job in &jobs {
+        let id = job.id;
+        assert!(!job.has("permissions"), "{id} asks for more");
+        let steps = job.steps();
+        let checkout = steps
+            .iter()
+            .find(|s| s.action().as_deref() == Some("actions/checkout"));
         if id == "delete-caches" {
-            assert!(
-                body.contains("    if: github.event_name == 'pull_request'\n"),
-                "{body}"
+            assert_eq!(
+                job.condition().as_deref(),
+                Some("github.event_name == 'pull_request'"),
+                "{job:#?}"
             );
-            assert!(!body.contains("actions/checkout"), "{body}");
+            assert!(checkout.is_none(), "{id} checks out the repository");
         } else {
-            assert!(
-                body.contains(
-                    "        with:\n          sparse-checkout: tools/ci\n          \
-                     persist-credentials: false\n"
-                ),
-                "{id} checks out more than tools/ci, or keeps the token: {body}"
+            let checkout = checkout.unwrap_or_else(|| panic!("{id} checks out nothing"));
+            assert_eq!(
+                grants(&checkout.yaml["with"]),
+                ["persist-credentials: false", "sparse-checkout: tools/ci"],
+                "{id} checks out more than tools/ci, or keeps the token"
             );
+            let body = job.text();
             assert!(
                 body.contains("--ref refs/heads/main ")
                     && body.contains("python3 tools/ci/superseded_caches.py")
                     && !body.contains("refs/pull/"),
                 "{id} acts on more than main's caches, or decides itself: {body}"
             );
+            let run = steps.iter().map(Step::run).collect::<Vec<_>>().join("\n");
             let (dry, delete) = (
-                body.find("if [ \"$DRY_RUN\" = true ]; then")
+                run.find("if [ \"$DRY_RUN\" = true ]; then")
                     .expect("a dry run"),
-                body.find("gh cache delete").expect("a delete"),
+                run.find("gh cache delete").expect("a delete"),
             );
             assert!(
-                body.find("cat \"$RUNNER_TEMP/superseded.txt\"")
+                run.find("cat \"$RUNNER_TEMP/superseded.txt\"")
                     .is_some_and(|printed| printed < dry && dry < delete),
-                "{id} deletes before it prints what it deletes: {body}"
+                "{id} deletes before it prints what it deletes: {run}"
             );
         }
     }
@@ -1833,11 +2040,10 @@ fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
 /// dist.yml), an exact release: not whatever is stable on the day.
 #[test]
 fn release_builds_use_one_pinned_rust() {
-    let pinned = DIST_YML
-        .lines()
-        .find_map(|l| l.strip_prefix("  RUST_TOOLCHAIN: "))
-        .expect("dist.yml sets RUST_TOOLCHAIN")
-        .trim_matches('"');
+    let dist = workflow("dist.yml");
+    let pinned = dist
+        .env("RUST_TOOLCHAIN")
+        .expect("dist.yml sets RUST_TOOLCHAIN");
     let parts: Vec<&str> = pinned.split('.').collect();
     assert!(
         parts.len() == 3 && parts.iter().all(|p| p.parse::<u32>().is_ok()),
@@ -1845,23 +2051,10 @@ fn release_builds_use_one_pinned_rust() {
     );
     // That every install is this one is every_workflow_builds_with_the_release_rust's.
     assert!(
-        dist_steps()
+        dist.steps()
             .iter()
-            .any(|s| s.text.contains("dtolnay/rust-toolchain@"))
+            .any(|s| s.action().as_deref() == Some("dtolnay/rust-toolchain"))
     );
-}
-
-/// A workflow's own `env:` value for `key` (the block at the top, not a
-/// job's or a step's), without its quotes.
-fn workflow_env<'a>(workflow: &'a str, key: &str) -> Option<&'a str> {
-    let prefix = format!("  {key}: ");
-    workflow
-        .lines()
-        .skip_while(|l| *l != "env:")
-        .skip(1)
-        .take_while(|l| l.is_empty() || l.starts_with(' '))
-        .find_map(|l| l.strip_prefix(prefix.as_str()))
-        .map(|value| value.trim().trim_matches('"'))
 }
 
 /// CI tests the compiler the installers are built with (C-1): ci.yml's
@@ -1879,21 +2072,19 @@ fn workflow_env<'a>(workflow: &'a str, key: &str) -> Option<&'a str> {
 fn every_workflow_builds_with_the_release_rust() {
     const PIN: &str = "${{ env.RUST_TOOLCHAIN }}";
     const AUDIT: &str = "workflows/audit.yml";
-    let release = workflow_env(DIST_YML, "RUST_TOOLCHAIN").expect("dist.yml sets RUST_TOOLCHAIN");
+    let release = workflow("dist.yml")
+        .env("RUST_TOOLCHAIN")
+        .expect("dist.yml sets RUST_TOOLCHAIN");
     assert_eq!(
-        workflow_env(CI_YML, "RUST_TOOLCHAIN"),
-        Some(release),
+        workflow("ci.yml").env("RUST_TOOLCHAIN").as_ref(),
+        Some(&release),
         "ci.yml's RUST_TOOLCHAIN isn't dist.yml's"
     );
 
     let mut pinned = 0;
     let mut audit = None;
-    for (file, text) in github_files() {
-        let code: Vec<&str> = text
-            .lines()
-            .filter(|l| !l.trim_start().starts_with('#'))
-            .collect();
-        for line in &code {
+    for file in github_files() {
+        for line in code(&file.yaml) {
             for other in [
                 "rustup toolchain install",
                 "rustup install",
@@ -1907,65 +2098,74 @@ fn every_workflow_builds_with_the_release_rust() {
             ] {
                 assert!(
                     !line.contains(other),
-                    "{file}: picks a Rust of its own: {}",
+                    "{}: picks a Rust of its own: {}",
+                    file.name,
                     line.trim()
                 );
             }
             assert!(
                 !line.contains("add-rust-environment-hash-key"),
-                "{file}: a Rust cache's key may leave out the toolchain: {}",
+                "{}: a Rust cache's key may leave out the toolchain: {}",
+                file.name,
                 line.trim()
             );
         }
-        let sets = code
-            .iter()
-            .filter(|l| l.trim_start().starts_with("RUST_TOOLCHAIN:"))
-            .count();
-        assert!(sets <= 1, "{file}: a job or step sets RUST_TOOLCHAIN again");
+        assert!(
+            every(&file.yaml, "RUST_TOOLCHAIN").len() <= 1,
+            "{}: a job or step sets RUST_TOOLCHAIN again",
+            file.name
+        );
 
-        let installs: Vec<Step> = workflow_steps(&text)
+        let installs: Vec<Step> = file
+            .steps()
             .into_iter()
-            .filter(|s| s.text.contains("uses: dtolnay/rust-toolchain@"))
+            .filter(|s| s.action().as_deref() == Some("dtolnay/rust-toolchain"))
             .collect();
         assert_eq!(
             installs.len(),
-            code.iter()
-                .filter(|l| l.contains("uses: dtolnay/rust-toolchain@"))
+            every(&file.yaml, "uses")
+                .into_iter()
+                .filter_map(scalar)
+                .filter(|u| u.starts_with("dtolnay/rust-toolchain@"))
                 .count(),
-            "{file}: a Rust installed outside a job's steps"
+            "{}: a Rust installed outside a job's steps",
+            file.name
         );
         for install in &installs {
-            let toolchain = with_value(install, "toolchain");
-            if file == AUDIT {
-                assert_eq!(toolchain, Some("stable"), "{install:#?}");
+            let toolchain = install.with("toolchain");
+            if file.name == AUDIT {
+                assert_eq!(toolchain.as_deref(), Some("stable"), "{install:#?}");
                 continue;
             }
             assert_eq!(
-                toolchain,
+                toolchain.as_deref(),
                 Some(PIN),
-                "{file}: job {} installs another Rust: {install:#?}",
+                "{}: job {} installs another Rust: {install:#?}",
+                file.name,
                 install.job
             );
             assert_eq!(
-                workflow_env(&text, "RUST_TOOLCHAIN"),
-                Some(release),
-                "{file}: job {} installs a Rust its workflow doesn't pin",
+                file.env("RUST_TOOLCHAIN").as_ref(),
+                Some(&release),
+                "{}: job {} installs a Rust its workflow doesn't pin",
+                file.name,
                 install.job
             );
             pinned += 1;
         }
-        if file == AUDIT {
-            audit = Some(text);
+        if file.name == AUDIT {
+            audit = Some(file);
         }
     }
     assert!(pinned > 0, "no Rust installs found");
 
     let audit = audit.unwrap_or_else(|| panic!("{AUDIT}"));
-    let cargo: Vec<&str> = audit
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.starts_with('#') && l.contains("cargo "))
-        .map(|l| l.strip_prefix("run: ").unwrap_or(l))
+    let cargo: Vec<String> = audit
+        .steps()
+        .iter()
+        .flat_map(Step::commands)
+        .map(|l| l.trim().to_owned())
+        .filter(|l| l.contains("cargo "))
         .collect();
     assert!(!cargo.is_empty(), "{AUDIT} runs no cargo");
     for line in cargo {
@@ -2004,21 +2204,23 @@ fn every_workflow_builds_with_the_release_rust() {
 /// the page's crate and the GUI checks' set none, or the same.
 #[test]
 fn every_crates_rust_version_is_the_pinned_rusts() {
-    let mut pinned = None;
-    for (file, workflow) in [("ci.yml", CI_YML), ("dist.yml", DIST_YML)] {
-        let toolchain = workflow_env(workflow, "RUST_TOOLCHAIN")
+    let mut pinned: Option<String> = None;
+    for file in ["ci.yml", "dist.yml"] {
+        let toolchain = workflow(file)
+            .env("RUST_TOOLCHAIN")
             .unwrap_or_else(|| panic!("{file} sets no RUST_TOOLCHAIN"));
         let major_minor = toolchain
             .rsplit_once('.')
-            .map(|(major_minor, _)| major_minor)
+            .map(|(major_minor, _)| major_minor.to_owned())
             .unwrap_or_else(|| panic!("{file}'s RUST_TOOLCHAIN isn't X.Y.Z: {toolchain}"));
         assert_eq!(
-            *pinned.get_or_insert(major_minor),
+            *pinned.get_or_insert_with(|| major_minor.clone()),
             major_minor,
             "ci.yml's and dist.yml's RUST_TOOLCHAIN differ"
         );
     }
     let pinned = pinned.expect("a pinned Rust");
+    let pinned = pinned.as_str();
 
     let rust_version = |manifest: &str| {
         manifest.lines().find_map(|l| {
@@ -2068,37 +2270,51 @@ fn every_crates_rust_version_is_the_pinned_rusts() {
 fn only_the_release_job_has_the_signing_key() {
     const KEY: &str = "TAURI_SIGNING_PRIVATE_KEY";
     let mut holders = Vec::new();
-    for (file, text) in github_files() {
-        for everything in ["secrets: inherit", "toJSON(secrets)", "toJson(secrets)"] {
-            assert!(!text.contains(everything), "{file}: {everything}");
+    for file in github_files() {
+        let text = lines(&file.yaml).join("\n");
+        for everything in ["toJSON(secrets)", "toJson(secrets)"] {
+            assert!(!text.contains(everything), "{}: {everything}", file.name);
         }
-        let outside_jobs = text.split("\njobs:\n").next().unwrap_or_default();
         assert!(
-            !outside_jobs
-                .lines()
-                .any(|l| l.contains(KEY) && !l.trim_start().starts_with('#')),
-            "{file} names {KEY} outside its jobs"
+            !every(&file.yaml, "secrets")
+                .into_iter()
+                .any(|s| scalar(s).as_deref() == Some("inherit")),
+            "{}: secrets: inherit",
+            file.name
         );
-        if file.starts_with("actions/") {
-            assert!(!text.contains(KEY), "{file} names {KEY}");
+        let outside_jobs: Vec<String> = entries(&file.yaml)
+            .into_iter()
+            .filter(|(k, _)| k != "jobs")
+            .flat_map(|(k, v)| std::iter::once(k).chain(lines(v)))
+            .collect();
+        assert!(
+            !outside_jobs.iter().any(|l| l.contains(KEY)),
+            "{} names {KEY} outside its jobs",
+            file.name
+        );
+        if file.name.starts_with("actions/") {
+            assert!(!text.contains(KEY), "{} names {KEY}", file.name);
             continue;
         }
-        for (job, body) in workflow_jobs(&text) {
-            if !body.contains(KEY) {
+        for job in file.jobs() {
+            if !job.text().contains(KEY) {
                 continue;
             }
-            let keys = job_keys(&text, &job);
-            assert!(
-                keys.contains(&"environment: release"),
-                "{file}: job {job} has the signing key outside the release environment: {keys:#?}"
+            assert_eq!(
+                job.environment().as_deref(),
+                Some("release"),
+                "{}: job {} has the signing key outside the release environment",
+                file.name,
+                job.id
             );
-            assert!(
-                keys.contains(
-                    &"if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
-                ),
-                "{file}: job {job} has the signing key on more than a run dispatched on main: {keys:#?}"
+            assert_eq!(
+                job.condition().as_deref(),
+                Some("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"),
+                "{}: job {} has the signing key on more than a run dispatched on main",
+                file.name,
+                job.id
             );
-            holders.push(format!("{file} {job}"));
+            holders.push(format!("{} {}", file.name, job.id));
         }
     }
     assert_eq!(holders, ["workflows/dist.yml sign"]);
@@ -2128,18 +2344,6 @@ const CLI_ARTIFACTS: [&str; 2] = [
     "gospel-getter-cli-windows-x86_64",
 ];
 
-const RELEASE_README: &str = include_str!("../../tools/release/README.md");
-
-/// The value of a step's `with:` key (`name`, `path`, `pattern`), if it
-/// has one.
-fn with_value<'a>(step: &'a Step, key: &str) -> Option<&'a str> {
-    let prefix = format!("          {key}: ");
-    step.text
-        .lines()
-        .find_map(|l| l.strip_prefix(prefix.as_str()))
-        .map(str::trim)
-}
-
 /// How a release's installers are signed (D-01, see the top of dist.yml).
 /// Every build is unsigned (`--no-sign`), with the updater overlay, as a
 /// release is built. On a run dispatched on main, the sign job signs those
@@ -2157,25 +2361,24 @@ fn with_value<'a>(step: &'a Step, key: &str) -> Option<&'a str> {
 /// never a name a release takes, and never the private key.
 #[test]
 fn only_a_release_run_signs_and_it_signs_what_was_checked() {
-    let steps = dist_steps();
-    let builds: Vec<&str> = steps
-        .iter()
-        .filter(|s| s.job == "linux" || s.job == "windows")
-        .flat_map(|s| s.text.lines())
-        .filter(|l| {
-            let l = l.trim_start();
-            l.strip_prefix("run: ")
-                .unwrap_or(l)
-                .starts_with("cargo tauri build")
-        })
+    let dist = workflow("dist.yml");
+    let job = |name: &str| dist.job(name).steps();
+    let builds: Vec<String> = ["linux", "windows"]
+        .into_iter()
+        .flat_map(job)
+        .flat_map(|s| s.commands())
+        .map(|l| l.trim_start().to_owned())
+        .filter(|l| l.starts_with("cargo tauri build"))
         .collect();
     assert!(
         builds.len() >= 2,
         "both jobs' installer builds: {builds:#?}"
     );
-    for build in builds {
+    for build in &builds {
         // What follows `--` goes to cargo, not to the Tauri CLI.
-        let tauri_args = build.split_once(" -- ").map_or(build, |(tauri, _)| tauri);
+        let tauri_args = build
+            .split_once(" -- ")
+            .map_or(build.as_str(), |(tauri, _)| tauri);
         assert!(
             tauri_args.contains("--config tauri.updater.conf.json")
                 && tauri_args.ends_with(" --no-sign"),
@@ -2183,70 +2386,62 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
         );
     }
 
-    let keys = dist_job_keys("sign");
-    assert!(
-        keys.contains(
-            &"needs: [linux, windows, gui-linux, gui-windows, upgrade-linux, upgrade-windows]"
-        ),
-        "the sign job should wait for the builds, both GUI checks and both upgrade checks: \
-         {keys:#?}"
+    assert_eq!(
+        dist.job("sign").needs(),
+        [
+            "linux",
+            "windows",
+            "gui-linux",
+            "gui-windows",
+            "upgrade-linux",
+            "upgrade-windows"
+        ],
+        "the sign job should wait for the builds, both GUI checks and both upgrade checks"
     );
-    let job = |name: &str| -> Vec<&Step> { steps.iter().filter(|s| s.job == name).collect() };
     let sign = job("sign");
-    let signs: Vec<&&Step> = sign
+    let signs: Vec<&Step> = sign
         .iter()
-        .filter(|s| s.text.contains("tools/release/sign_installers.py"))
+        .filter(|s| s.run().contains("tools/release/sign_installers.py"))
         .collect();
     assert_eq!(signs.len(), 1, "{sign:#?}");
-    assert!(
-        signs[0]
-            .text
-            .contains("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"),
+    assert_eq!(
+        signs[0].env("TAURI_SIGNING_PRIVATE_KEY").as_deref(),
+        Some("${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"),
         "{signs:#?}"
     );
-    let uploads: Vec<&&Step> = sign
-        .iter()
-        .filter(|s| s.text.contains("actions/upload-artifact@"))
-        .collect();
+    let uploads: Vec<&Step> = sign.iter().filter(|s| s.uploads()).collect();
     for (built_by, artifact) in INSTALLER_ARTIFACTS {
-        let name = format!("          name: {artifact}\n");
         assert!(
             job(built_by)
                 .iter()
-                .any(|s| s.text.contains("actions/upload-artifact@") && s.text.contains(&name)),
+                .any(|s| s.uploads() && s.with("name").as_deref() == Some(artifact)),
             "job {built_by} doesn't upload {artifact}"
         );
         // Never under the build artifact's own name: it stays as built.
         assert!(
             !uploads
                 .iter()
-                .any(|s| with_value(s, "name") == Some(artifact)),
+                .any(|s| s.with("name").as_deref() == Some(artifact)),
             "the sign job replaces the build's {artifact}: {uploads:#?}"
         );
         let signed = format!("{artifact}{SIGNED}");
-        let up: Vec<&&&Step> = uploads
+        let up: Vec<&&Step> = uploads
             .iter()
-            .filter(|s| with_value(s, "name") == Some(signed.as_str()))
+            .filter(|s| s.with("name").as_deref() == Some(signed.as_str()))
             .collect();
         assert_eq!(up.len(), 1, "the sign job uploads {signed} once");
-        let text = &up[0].text;
         assert!(
-            text.contains(&format!("          path: installers/{artifact}/\n"))
-                && text.contains("          overwrite: true\n")
-                && text.contains("          if-no-files-found: error\n"),
-            "{text}"
-        );
-        // The release procedure takes the signed one.
-        assert!(
-            RELEASE_README.contains(&format!("`{signed}`")),
-            "tools/release/README.md doesn't name {signed}"
+            up[0].with("path") == Some(format!("installers/{artifact}/"))
+                && up[0].with("overwrite").as_deref() == Some("true")
+                && up[0].with("if-no-files-found").as_deref() == Some("error"),
+            "{up:#?}"
         );
     }
     // Uploaded to nowhere else: the release's artifacts are the four above,
     // each a -signed name.
     assert_eq!(uploads.len(), INSTALLER_ARTIFACTS.len(), "{uploads:#?}");
     for upload in &uploads {
-        let name = with_value(upload, "name").unwrap_or_default();
+        let name = upload.with("name").unwrap_or_default();
         assert!(
             name.ends_with(SIGNED)
                 && INSTALLER_ARTIFACTS
@@ -2256,9 +2451,9 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
         );
     }
     // overwrite: on the -signed names only, anywhere in dist.yml.
-    for step in &steps {
-        if step.text.contains("          overwrite: true\n") {
-            let name = with_value(step, "name").unwrap_or_default();
+    for step in dist.steps() {
+        if step.with("overwrite").as_deref() == Some("true") {
+            let name = step.with("name").unwrap_or_default();
             assert!(
                 step.job == "sign" && name.ends_with(SIGNED),
                 "job {} overwrites {name:?}: {step:#?}",
@@ -2267,43 +2462,36 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
         }
     }
 
-    let keys = dist_job_keys("sign-rehearsal");
-    let condition = keys
-        .iter()
-        .find_map(|k| k.strip_prefix("if: "))
-        .expect("the rehearsal has an if:");
+    let rehearsal_job = dist.job("sign-rehearsal");
+    let condition = rehearsal_job.condition().expect("the rehearsal has an if:");
     assert!(
         condition.contains(
             "github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'"
         ) && condition.contains("startsWith(github.head_ref, 'release/')"),
         "{condition}"
     );
-    assert!(!keys.iter().any(|k| k.starts_with("environment:")));
-    let rehearsal = job("sign-rehearsal");
+    assert!(!rehearsal_job.has("environment"));
+    let rehearsal = rehearsal_job.steps();
     assert!(
-        rehearsal.iter().any(|s| s
-            .text
-            .contains("python3 tools/release/sign_installers.py installers \\")
-            && s.text
-                .contains("--private-key-path \"$RUNNER_TEMP/rehearsal.key\"")
-            && s.text
-                .contains("--pubkey-file \"$RUNNER_TEMP/rehearsal.key.pub\"")),
+        rehearsal.iter().any(|s| {
+            let run = s.run();
+            run.contains("python3 tools/release/sign_installers.py installers \\")
+                && run.contains("--private-key-path \"$RUNNER_TEMP/rehearsal.key\"")
+                && run.contains("--pubkey-file \"$RUNNER_TEMP/rehearsal.key.pub\"")
+        }),
         "{rehearsal:#?}"
     );
     // The rehearsal's signatures are worthless (a throwaway key the app
     // doesn't trust), so nothing it uploads can pass for a release's: each
     // of its four signed artifacts is a release's -signed name under
     // REHEARSAL, plus its public key, and never the private key.
-    let rehearsal_uploads: Vec<&&Step> = rehearsal
-        .iter()
-        .filter(|s| s.text.contains("actions/upload-artifact@"))
-        .collect();
+    let rehearsal_uploads: Vec<&Step> = rehearsal.iter().filter(|s| s.uploads()).collect();
     let mut uploaded: Vec<(String, String)> = rehearsal_uploads
         .iter()
         .map(|s| {
             (
-                with_value(s, "name").unwrap_or_default().to_owned(),
-                with_value(s, "path").unwrap_or_default().to_owned(),
+                s.with("name").unwrap_or_default(),
+                s.with("path").unwrap_or_default(),
             )
         })
         .collect();
@@ -2328,9 +2516,11 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
     );
     for upload in &rehearsal_uploads {
         assert!(
-            !upload.text.contains("overwrite:")
-                && !upload.text.contains("rehearsal.key\n")
-                && upload.text.contains("          retention-days: 7\n"),
+            upload.with("overwrite").is_none()
+                && !lines(upload.yaml)
+                    .iter()
+                    .any(|l| l.trim_end().ends_with("rehearsal.key"))
+                && upload.with("retention-days").as_deref() == Some("7"),
             "{upload:#?}"
         );
     }
@@ -2339,25 +2529,20 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
     // as gospel-getter-linux-* would take gospel-getter-linux-appimage-signed
     // too, which a re-run of the sign job would then sign again).
     for name in ["sign", "sign-rehearsal"] {
-        let downloads: Vec<&Step> = job(name)
-            .into_iter()
-            .filter(|s| s.text.contains("actions/download-artifact@"))
-            .collect();
+        let steps = job(name);
+        let downloads: Vec<&Step> = steps.iter().filter(|s| s.downloads()).collect();
         for download in &downloads {
             assert!(
-                with_value(download, "pattern").is_none(),
+                download.with("pattern").is_none(),
                 "job {name} downloads by a pattern, which can take a -signed artifact: {download:#?}"
             );
-            let artifact = with_value(download, "name").unwrap_or_default();
+            let artifact = download.with("name").unwrap_or_default();
             assert!(
                 !artifact.is_empty() && !artifact.ends_with(SIGNED),
                 "job {name} downloads {artifact:?}: {download:#?}"
             );
         }
-        let mut names: Vec<&str> = downloads
-            .iter()
-            .filter_map(|s| with_value(s, "name"))
-            .collect();
+        let mut names: Vec<String> = downloads.iter().filter_map(|s| s.with("name")).collect();
         names.sort_unstable();
         let mut expected: Vec<&str> = INSTALLER_ARTIFACTS.iter().map(|(_, a)| *a).collect();
         expected.sort_unstable();
@@ -2368,11 +2553,11 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
         for (_, artifact) in INSTALLER_ARTIFACTS {
             let into = downloads
                 .iter()
-                .find(|s| with_value(s, "name") == Some(artifact))
-                .and_then(|s| with_value(s, "path"));
+                .find(|s| s.with("name").as_deref() == Some(artifact))
+                .and_then(|s| s.with("path"));
             assert_eq!(
                 into,
-                Some(format!("installers/{artifact}").as_str()),
+                Some(format!("installers/{artifact}")),
                 "job {name}: {artifact} goes into its own folder"
             );
         }
@@ -2386,19 +2571,8 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
     let signer = signer_version();
     for name in ["sign", "sign-rehearsal"] {
         let steps = job(name);
-        let code = |step: &Step| -> String {
-            step.text
-                .lines()
-                .filter(|l| !l.trim_start().starts_with('#'))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
         let tools: Vec<usize> = (0..steps.len())
-            .filter(|&i| {
-                steps[i]
-                    .text
-                    .contains("uses: ./.github/actions/build-tools")
-            })
+            .filter(|&i| steps[i].get("uses").as_deref() == Some("./.github/actions/build-tools"))
             .collect();
         assert_eq!(
             tools.len(),
@@ -2406,13 +2580,13 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
             "job {name} gets one set of build tools: {steps:#?}"
         );
         assert_eq!(
-            with_value(steps[tools[0]], "set"),
+            steps[tools[0]].with("set").as_deref(),
             Some("signer"),
             "job {name}: {:#?}",
             steps[tools[0]]
         );
         for step in &steps {
-            let code = code(step);
+            let code = step.code();
             for banned in [
                 "cargo install",
                 "rust-cache",
@@ -2425,10 +2599,11 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
                 );
             }
         }
+        let runs = |i: usize| steps[i].commands().join("\n");
         let check = (0..steps.len())
-            .find(|&i| code(steps[i]).contains("version=\"$(cargo tauri --version)\""))
+            .find(|&i| runs(i).contains("version=\"$(cargo tauri --version)\""))
             .unwrap_or_else(|| panic!("job {name} doesn't print `cargo tauri --version`"));
-        let checked = code(steps[check]);
+        let checked = runs(check);
         assert!(
             checked.contains("[ \"$version\" != \"tauri-cli $TAURI_CLI_VERSION\" ]")
                 && checked.contains("want=\"$RUNNER_TEMP/build-tools/bin/cargo-tauri\"")
@@ -2440,8 +2615,7 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
         let first_use = (0..steps.len())
             .find(|&i| {
                 i != check
-                    && (code(steps[i]).contains("cargo tauri")
-                        || code(steps[i]).contains("sign_installers.py"))
+                    && (runs(i).contains("cargo tauri") || runs(i).contains("sign_installers.py"))
             })
             .unwrap_or_else(|| panic!("job {name} never signs"));
         assert!(
@@ -2450,8 +2624,8 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
         );
     }
     assert_eq!(
-        Some(signer.as_str()),
-        workflow_env(DIST_YML, "TAURI_CLI_VERSION"),
+        Some(signer),
+        dist.env("TAURI_CLI_VERSION"),
         "the signer row's version is TAURI_CLI_VERSION"
     );
 }
@@ -2525,33 +2699,30 @@ fn signer_version() -> String {
 #[test]
 fn the_installer_jobs_build_with_the_pinned_prebuilt_tauri_cli() {
     let signer = signer_version();
-    assert_eq!(
-        workflow_env(DIST_YML, "TAURI_CLI_VERSION"),
-        Some(signer.as_str())
-    );
-    let steps = dist_steps();
+    let dist = workflow("dist.yml");
+    assert_eq!(dist.env("TAURI_CLI_VERSION"), Some(signer));
     for job in ["linux", "windows"] {
-        let own: Vec<&Step> = steps.iter().filter(|s| s.job == job).collect();
+        let own = dist.job(job).steps();
         assert!(
-            !own.iter().any(|s| s.text.contains("cargo install")),
+            !own.iter().any(|s| s.text().contains("cargo install")),
             "job {job} compiles a tool: {own:#?}"
         );
         let got = own
             .iter()
             .position(|s| {
-                s.text.contains("uses: ./.github/actions/build-tools")
-                    && with_value(s, "set") == Some("signer")
+                s.get("uses").as_deref() == Some("./.github/actions/build-tools")
+                    && s.with("set").as_deref() == Some("signer")
             })
             .unwrap_or_else(|| panic!("job {job} doesn't get the prebuilt CLI"));
         let check = own
             .iter()
-            .position(|s| s.name == "Check the Tauri CLI is the pinned one")
+            .position(|s| s.name() == "Check the Tauri CLI is the pinned one")
             .unwrap_or_else(|| panic!("job {job} doesn't check the CLI"));
         let build = own
             .iter()
             .position(|s| {
-                s.text
-                    .lines()
+                s.commands()
+                    .iter()
                     .any(|l| l.trim_start().starts_with("cargo tauri build"))
             })
             .unwrap_or_else(|| panic!("job {job} builds no installers"));
@@ -2559,7 +2730,7 @@ fn the_installer_jobs_build_with_the_pinned_prebuilt_tauri_cli() {
             got < check && check < build,
             "job {job}: the CLI is got, then checked, then used"
         );
-        let text = &own[check].text;
+        let text = own[check].run();
         for must in [
             "cargo tauri --version",
             "TAURI_CLI_VERSION",
@@ -2592,42 +2763,30 @@ fn the_installer_jobs_build_with_the_pinned_prebuilt_tauri_cli() {
 #[test]
 fn the_bundle_job_assembles_the_release_files_without_the_key() {
     const FROM: &str = "${{ env.FROM }}";
-    let keys = dist_job_keys("bundle");
+    let dist = workflow("dist.yml");
+    let bundle = dist.job("bundle");
     // A plain name: a job cancelled before it starts keeps an expression
     // unevaluated on the commit, a check that never clears (see #233).
-    let name = keys
-        .iter()
-        .find_map(|k| k.strip_prefix("name: "))
-        .expect("the bundle job has a name");
+    let name = bundle.get("name").expect("the bundle job has a name");
     assert!(!name.contains("${{"), "the bundle job's name: {name}");
     assert_eq!(name, "Assemble the release files");
-    assert!(keys.contains(&"needs: [sign, sign-rehearsal]"), "{keys:#?}");
-    assert!(
-        keys.contains(
-            &"if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && \
-               github.ref == 'refs/heads/main' && needs.sign.result == 'success') || \
-               needs.sign-rehearsal.result == 'success') }}"
+    assert_eq!(bundle.needs(), ["sign", "sign-rehearsal"], "{bundle:#?}");
+    assert_eq!(
+        bundle.condition().as_deref(),
+        Some(
+            "!cancelled() && ((github.event_name == 'workflow_dispatch' && \
+             github.ref == 'refs/heads/main' && needs.sign.result == 'success') || \
+             needs.sign-rehearsal.result == 'success')"
         ),
-        "the bundle follows the sign job on its condition, or the rehearsal: {keys:#?}"
+        "the bundle follows the sign job on its condition, or the rehearsal"
     );
-    assert!(
-        !keys.iter().any(|k| k.starts_with("environment")),
-        "{keys:#?}"
+    assert!(!bundle.has("environment"), "{bundle:#?}");
+    assert_eq!(
+        grants(&bundle.yaml["permissions"]),
+        ["contents: read"],
+        "the bundle job reads only"
     );
-    let body = workflow_jobs(DIST_YML)
-        .into_iter()
-        .find(|(id, _)| id == "bundle")
-        .map(|(_, body)| body)
-        .expect("dist.yml has a bundle job");
-    let permissions: Vec<&str> = body
-        .lines()
-        .skip_while(|l| *l != "    permissions:")
-        .skip(1)
-        .take_while(|l| l.starts_with("      "))
-        .map(str::trim)
-        .collect();
-    assert_eq!(permissions, ["contents: read"], "the bundle job reads only");
-    for line in body.lines().filter(|l| !l.trim_start().starts_with('#')) {
+    for line in code(bundle.yaml) {
         assert!(
             !line.contains("secrets.") && !line.contains("TAURI_SIGNING"),
             "the bundle job names a secret: {line}"
@@ -2644,24 +2803,22 @@ fn the_bundle_job_assembles_the_release_files_without_the_key() {
              'rehearsal-release-bundle' }}",
         ),
     ] {
-        assert!(
-            body.contains(&format!("\n      {name}: {value}\n")),
+        assert_eq!(
+            bundle.env(name).as_deref(),
+            Some(value),
             "the bundle job's {name}"
         );
     }
 
-    let steps: Vec<Step> = dist_steps()
-        .into_iter()
-        .filter(|s| s.job == "bundle")
-        .collect();
+    let steps = bundle.steps();
     let mut downloads: Vec<(String, String)> = steps
         .iter()
-        .filter(|s| s.text.contains("actions/download-artifact@"))
+        .filter(|s| s.downloads())
         .map(|s| {
-            assert!(with_value(s, "pattern").is_none(), "{s:#?}");
+            assert!(s.with("pattern").is_none(), "{s:#?}");
             (
-                with_value(s, "name").unwrap_or_default().to_owned(),
-                with_value(s, "path").unwrap_or_default().to_owned(),
+                s.with("name").unwrap_or_default(),
+                s.with("path").unwrap_or_default(),
             )
         })
         .collect();
@@ -2685,64 +2842,44 @@ fn the_bundle_job_assembles_the_release_files_without_the_key() {
     assert_eq!(downloads, expected, "the bundle job's downloads");
     let pubkey = steps
         .iter()
-        .find(|s| with_value(s, "name") == Some("rehearsal-signing-pubkey"))
+        .find(|s| s.with("name").as_deref() == Some("rehearsal-signing-pubkey"))
         .expect("the rehearsal's public key");
-    assert!(
-        pubkey
-            .text
-            .contains("        if: env.FROM == 'rehearsal-'\n"),
+    assert_eq!(
+        pubkey.condition().as_deref(),
+        Some("env.FROM == 'rehearsal-'"),
         "only a rehearsal's bundle takes another key: {pubkey:#?}"
     );
 
     let assemble = steps
         .iter()
-        .find(|s| s.text.contains("tools/release/bundle_release.py"))
+        .find(|s| s.run().contains("tools/release/bundle_release.py"))
         .expect("the bundle job runs bundle_release.py");
+    let run = assemble.run();
     assert!(
-        assemble.text.contains(
+        run.contains(
             "python3 tools/release/bundle_release.py bundle-in release-bundle \"${key[@]}\""
-        ) && assemble.text.contains("sha256sum -c SHA256SUMS")
-            && assemble
-                .text
-                .contains("if [ \"${FROM:-}\" = rehearsal- ]; then"),
+        ) && run.contains("sha256sum -c SHA256SUMS")
+            && run.contains("if [ \"${FROM:-}\" = rehearsal- ]; then"),
         "{assemble:#?}"
     );
-    let uploads: Vec<&Step> = steps
-        .iter()
-        .filter(|s| s.text.contains("actions/upload-artifact@"))
-        .collect();
-    assert_eq!(uploads.len(), 1, "one artifact: {uploads:#?}");
-    let upload = &uploads[0].text;
-    assert!(
-        upload.contains("          name: ${{ env.BUNDLE }}\n")
-            && upload.contains("          path: release-bundle/\n")
-            && upload.contains("          if-no-files-found: error\n")
-            && upload.contains("          retention-days: 14\n"),
-        "{upload}"
+    let uploads: Vec<&Step> = steps.iter().filter(|s| s.uploads()).collect();
+    let [upload] = uploads.as_slice() else {
+        panic!("one artifact: {uploads:#?}");
+    };
+    assert_eq!(
+        grants(&upload.yaml["with"]),
+        [
+            "if-no-files-found: error",
+            "name: ${{ env.BUNDLE }}",
+            "path: release-bundle/",
+            "retention-days: 14",
+        ],
+        "{upload:#?}"
     );
-    // The publish takes the bundle, and checks it once more.
-    for words in [
-        "`gospel-getter-release-bundle`",
-        "gh run download RUN_ID -n gospel-getter-release-bundle -D bundle",
-        "(cd bundle && sha256sum -c SHA256SUMS)",
-        "--notes-file NOTES.md --assets bundle",
-    ] {
-        assert!(
-            RELEASE_README.contains(words),
-            "tools/release/README.md doesn't say {words}"
-        );
-    }
     // Nothing but the rehearsal and the bundle job's FROM names a rehearsal
     // artifact: never the sign job.
-    for step in dist_steps() {
-        // A step's own lines: what follows the last of a job's steps
-        // (comments, the next job's keys) reads into it.
-        let names_one = step
-            .text
-            .lines()
-            .filter(|l| l.starts_with("      ") && !l.trim_start().starts_with('#'))
-            .any(|l| l.contains(REHEARSAL));
-        if names_one && step.job != "sign-rehearsal" {
+    for step in dist.steps() {
+        if step.code().contains(REHEARSAL) && step.job != "sign-rehearsal" {
             assert_eq!(step.job, "bundle", "{step:#?}");
         }
     }
@@ -2753,10 +2890,7 @@ fn the_bundle_job_assembles_the_release_files_without_the_key() {
 /// and pull request runs still cancel the run in progress on their ref.
 #[test]
 fn a_push_never_cancels_a_dispatched_run() {
-    let group = DIST_YML
-        .lines()
-        .skip_while(|l| *l != "concurrency:")
-        .find_map(|l| l.trim().strip_prefix("group: "))
+    let group = scalar(&workflow("dist.yml").yaml["concurrency"]["group"])
         .expect("dist.yml has a concurrency group");
     assert_eq!(
         group,
@@ -2775,44 +2909,36 @@ fn a_push_never_cancels_a_dispatched_run() {
 /// adding the `ci:full` label starts no CI run and cancels none.
 #[test]
 fn ci_cancels_only_a_pull_requests_superseded_run() {
-    let concurrency: Vec<&str> = CI_YML
-        .lines()
-        .skip_while(|l| *l != "concurrency:")
-        .skip(1)
-        .take_while(|l| l.starts_with("  "))
-        .map(str::trim)
-        .collect();
+    let ci = workflow("ci.yml");
     let value = |key: &str| {
-        concurrency
-            .iter()
-            .find_map(|l| l.strip_prefix(key))
-            .unwrap_or_else(|| panic!("ci.yml's concurrency has no {key}: {concurrency:#?}"))
+        scalar(&ci.yaml["concurrency"][key])
+            .unwrap_or_else(|| panic!("ci.yml's concurrency has no {key}"))
     };
     assert_eq!(
-        value("group: "),
+        value("group"),
         "ci-${{ github.event_name == 'pull_request' && \
          format('pr-{0}', github.event.pull_request.number) || github.run_id }}",
         "a pull request's runs share a group, and every other run is a group of its own"
     );
     assert_eq!(
-        value("cancel-in-progress: "),
+        value("cancel-in-progress"),
         "${{ github.event_name == 'pull_request' }}",
         "only a pull request's runs cancel"
     );
 
-    let triggers: Vec<&str> = CI_YML
-        .lines()
-        .skip_while(|l| *l != "on:")
-        .skip(1)
-        .take_while(|l| l.is_empty() || l.starts_with(' '))
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect();
-    assert!(triggers.contains(&"pull_request:"), "{triggers:#?}");
+    let on = &ci.yaml["on"];
+    let triggers: Vec<String> = match on {
+        Yaml::Hash(_) => entries(on).into_iter().map(|(k, _)| k).collect(),
+        other => list(other),
+    };
     assert!(
-        !triggers.iter().any(|l| l.starts_with("types:")),
-        "pull_request on its default types (no labeled, so a label cancels nothing): \
-         {triggers:#?}"
+        triggers.iter().any(|t| t == "pull_request"),
+        "{triggers:#?}"
+    );
+    assert!(
+        on["pull_request"]["types"].is_badvalue(),
+        "pull_request on its default types (no labeled, so a label cancels nothing): {}",
+        flow(on)
     );
 }
 
@@ -2822,13 +2948,7 @@ fn ci_cancels_only_a_pull_requests_superseded_run() {
 /// waits for both, so a failed upgrade blocks the release.
 #[test]
 fn every_release_build_checks_an_upgrade_from_the_previous_release() {
-    let condition = |job: &str| -> Option<String> {
-        dist_job_keys(job)
-            .into_iter()
-            .find_map(|k| k.strip_prefix("if: "))
-            .map(str::to_owned)
-    };
-    let steps = dist_steps();
+    let dist = workflow("dist.yml");
     for (upgrade, gui, build, artifact, platform) in [
         (
             "upgrade-linux",
@@ -2845,83 +2965,67 @@ fn every_release_build_checks_an_upgrade_from_the_previous_release() {
             "windows",
         ),
     ] {
-        let keys = dist_job_keys(upgrade);
-        assert!(
-            keys.contains(&format!("needs: [{build}]").as_str()),
-            "{upgrade} should wait for {build}: {keys:#?}"
-        );
+        let job = dist.job(upgrade);
+        assert_eq!(job.needs(), [build], "{upgrade} should wait for {build}");
         assert_eq!(
-            condition(upgrade),
-            condition(gui),
+            job.condition(),
+            dist.job(gui).condition(),
             "{upgrade} should run exactly when {gui} does"
         );
-        let own: Vec<&Step> = steps.iter().filter(|s| s.job == upgrade).collect();
+        let own = job.steps();
         assert!(
             own.iter()
-                .any(|s| s.text.contains(&format!("          name: {artifact}\n"))),
+                .any(|s| s.with("name").as_deref() == Some(artifact)),
             "{upgrade} should check this run's {artifact}: {own:#?}"
         );
         let previous = own
             .iter()
-            .find(|s| s.text.contains("tools/ci/upgrade_check.py previous"))
+            .find(|s| s.run().contains("tools/ci/upgrade_check.py previous"))
             .unwrap_or_else(|| panic!("{upgrade} gets no previous release: {own:#?}"));
         assert!(
             previous
-                .text
+                .run()
                 .contains(&format!("previous --platform {platform} "))
-                && previous.text.contains("GH_TOKEN: ${{ github.token }}")
-                && !previous.text.contains("continue-on-error"),
+                && previous.env("GH_TOKEN").as_deref() == Some("${{ github.token }}")
+                && !previous.has("continue-on-error"),
             "{upgrade}: {previous:#?}"
         );
         // And back the other way, as About's Go back does: this build
         // first, the previous release over it, expecting its version.
         let back = own
             .iter()
-            .find(|s| s.text.contains("tools/ci/upgrade_check.py back "))
+            .find(|s| s.run().contains("tools/ci/upgrade_check.py back "))
             .unwrap_or_else(|| panic!("{upgrade} never goes back: {own:#?}"));
         assert!(
-            back.text
-                .contains("GOSPEL_GETTER_UPGRADE_CHECK: throwaway-runner")
-                && back
-                    .text
-                    .contains("BACK_TO: ${{ steps.previous.outputs.installer }}")
-                && back
-                    .text
-                    .contains("BACK_TAG: ${{ steps.previous.outputs.tag }}")
-                && back.text.contains("--to \"$BACK_TO\"")
-                && back.text.contains("--expect-version \"${BACK_TAG#v}\"")
-                && !back.text.contains("continue-on-error")
-                && !back.text.contains("        if:"),
+            back.env("GOSPEL_GETTER_UPGRADE_CHECK").as_deref() == Some("throwaway-runner")
+                && back.env("BACK_TO").as_deref()
+                    == Some("${{ steps.previous.outputs.installer }}")
+                && back.env("BACK_TAG").as_deref() == Some("${{ steps.previous.outputs.tag }}")
+                && back.run().contains("--to \"$BACK_TO\"")
+                && back.run().contains("--expect-version \"${BACK_TAG#v}\"")
+                && !back.has("continue-on-error")
+                && !back.has("if"),
             "{upgrade}: {back:#?}"
         );
         let check = own
             .iter()
-            .find(|s| s.text.contains("tools/ci/upgrade_check.py run "))
+            .find(|s| s.run().contains("tools/ci/upgrade_check.py run "))
             .unwrap_or_else(|| panic!("{upgrade} runs no upgrade check: {own:#?}"));
         assert!(
-            check
-                .text
-                .contains("GOSPEL_GETTER_UPGRADE_CHECK: throwaway-runner")
+            check.env("GOSPEL_GETTER_UPGRADE_CHECK").as_deref() == Some("throwaway-runner")
                 && check
-                    .text
+                    .text()
                     .contains("${{ steps.previous.outputs.installer }}")
-                && !check.text.contains("continue-on-error")
-                && !check.text.contains("        if:"),
+                && !check.has("continue-on-error")
+                && !check.has("if"),
             "{upgrade}: {check:#?}"
         );
     }
-    let sign = dist_job_keys("sign");
-    let needs = sign
-        .iter()
-        .find_map(|k| k.strip_prefix("needs: "))
-        .expect("the sign job's needs");
+    let needs = dist.job("sign").needs();
     for upgrade in ["upgrade-linux", "upgrade-windows"] {
         assert!(
-            needs
-                .trim_matches(['[', ']'])
-                .split(", ")
-                .any(|n| n == upgrade),
-            "the sign job doesn't wait for {upgrade}: {needs}"
+            needs.iter().any(|n| n == upgrade),
+            "the sign job doesn't wait for {upgrade}: {needs:?}"
         );
     }
 }
@@ -2934,27 +3038,24 @@ fn every_release_build_checks_an_upgrade_from_the_previous_release() {
 /// ([`LABEL_GATE`]), cancels nothing, and the jobs behind the required
 /// checks never carry a check's name in it, so a skip (which counts as
 /// passing) never stands in for a required check (they stay: "Linux
-/// (AppImage + deb)", "Windows (NSIS installer)", "GUI checks (Linux)"). The label can never reach the sign
-/// job, which has the release's key: its gate is a run dispatched on main
-/// alone (`only_the_release_job_has_the_signing_key`).
+/// (AppImage + deb)", "Windows (NSIS installer)", "GUI checks (Linux)"). The
+/// label can never reach the sign job, which has the release's key: its gate
+/// is a run dispatched on main alone
+/// (`only_the_release_job_has_the_signing_key`).
 #[test]
 fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
     const FULL: &str = "contains(github.event.pull_request.labels.*.name, 'ci:full')";
-    let types = DIST_YML
-        .lines()
-        .skip_while(|l| *l != "  pull_request:")
-        .skip(1)
-        .take_while(|l| l.starts_with("    "))
-        .find_map(|l| l.trim().strip_prefix("types: "))
-        .expect("dist.yml's pull_request types");
-    assert_eq!(types, "[opened, synchronize, reopened, labeled]");
+    let dist = workflow("dist.yml");
+    assert_eq!(
+        list(&dist.yaml["on"]["pull_request"]["types"]),
+        ["opened", "synchronize", "reopened", "labeled"]
+    );
 
     for job in ["gui-windows", "sign-rehearsal"] {
-        let keys = dist_job_keys(job);
-        let condition = keys
-            .iter()
-            .find_map(|k| k.strip_prefix("if: "))
-            .unwrap_or_else(|| panic!("job {job} has no if: {keys:#?}"));
+        let condition = dist
+            .job(job)
+            .condition()
+            .unwrap_or_else(|| panic!("job {job} has no if"));
         assert!(
             condition.contains(&format!(
                 "github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') \
@@ -2963,16 +3064,15 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
             "job {job}: {condition}"
         );
     }
-    let steps = dist_steps();
-    let gui_windows = dist_job_keys("gui-windows")
-        .into_iter()
-        .find_map(|k| k.strip_prefix("if: "))
+    let gui_windows = dist
+        .job("gui-windows")
+        .condition()
         .expect("gui-windows's if");
     // Its test app is built whenever it runs, and in no other label's run.
-    let test_app = dist_job_keys(WINDOWS_TEST_APP_JOB);
-    assert!(
-        test_app.contains(&format!("if: ({LABEL_GATE}) && ({gui_windows})").as_str()),
-        "the test app isn't built when gui-windows runs: {test_app:#?}"
+    assert_eq!(
+        dist.job(WINDOWS_TEST_APP_JOB).condition(),
+        Some(format!("({LABEL_GATE}) && ({gui_windows})")),
+        "the test app isn't built when gui-windows runs"
     );
 
     // Another label's run: every job that runs anything is skipped by the
@@ -2982,11 +3082,10 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
         ("windows", "Windows (NSIS installer)"),
         ("gui-linux", "GUI checks (Linux)"),
     ] {
-        let keys = dist_job_keys(job);
+        let keys = dist.job(job);
         let name = keys
-            .iter()
-            .find_map(|k| k.strip_prefix("name: "))
-            .unwrap_or_else(|| panic!("job {job} has no name: {keys:#?}"));
+            .get("name")
+            .unwrap_or_else(|| panic!("job {job} has no name"));
         let named = name
             .strip_prefix(&format!("${{{{ ({LABEL_GATE}) && '"))
             .and_then(|rest| rest.strip_suffix("' }}"))
@@ -3001,14 +3100,10 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
             named.0, required,
             "job {job}: a required check's name changed"
         );
-        let needs = keys
-            .iter()
-            .find_map(|k| k.strip_prefix("needs: "))
-            .unwrap_or_default();
-        let gated = keys.iter().any(|k| {
-            k.strip_prefix("if: ")
-                .is_some_and(|c| c.contains(&format!("({LABEL_GATE})")))
-        });
+        let needs = keys.needs().join(", ");
+        let gated = keys
+            .condition()
+            .is_some_and(|c| c.contains(&format!("({LABEL_GATE})")));
         assert!(
             gated || needs.contains("linux") || needs.contains("windows"),
             "job {job} runs in another label's run: {keys:#?}"
@@ -3016,39 +3111,28 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
     }
     // The rest run only after the builds, so not in that run either.
     for job in ["gui-windows", "sign-rehearsal", "sign"] {
-        let keys = dist_job_keys(job);
-        let needs = keys
-            .iter()
-            .find_map(|k| k.strip_prefix("needs: "))
-            .unwrap_or_default();
         assert!(
-            needs.contains("windows"),
-            "job {job} doesn't wait for the builds: {keys:#?}"
+            dist.job(job).needs().join(", ").contains("windows"),
+            "job {job} doesn't wait for the builds"
         );
     }
 
     // The sign job: dispatched on main only, whatever the labels.
-    let sign = dist_job_keys("sign");
-    assert!(
-        sign.contains(
-            &"if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
-        ),
-        "{sign:#?}"
+    let sign = dist.job("sign");
+    assert_eq!(
+        sign.condition().as_deref(),
+        Some("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'")
     );
-    for key in &sign {
+    for key in sign.own_lines() {
         for word in ["ci:full", "label", "pull_request", "head_ref"] {
             assert!(!key.contains(word), "the sign job's {key} names {word}");
         }
     }
-    // Its steps' own lines: what follows the last of them up to the next
-    // job's steps (comments, and that job's own keys) reads into it.
     assert!(
-        !steps
-            .iter()
-            .filter(|s| s.job == "sign")
-            .flat_map(|s| s.text.lines())
-            .filter(|l| l.starts_with("      ") && !l.trim_start().starts_with('#'))
-            .any(|l| l.contains("ci:full") || l.contains("label")),
+        !sign.steps().iter().any(|s| {
+            let code = s.code();
+            code.contains("ci:full") || code.contains("label")
+        }),
         "a sign step looks at labels"
     );
 }
@@ -3066,90 +3150,72 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
 /// request's head commit, older than itself, that ended cancelled.
 #[test]
 fn the_ci_full_run_deletes_only_the_run_it_superseded() {
-    let keys = dist_job_keys("supersede");
-    assert!(
-        keys.contains(
-            &format!(
-                "if: github.event_name == 'pull_request' && \
-                 contains(github.event.pull_request.labels.*.name, 'ci:full') && ({LABEL_GATE})"
-            )
-            .as_str()
-        ),
-        "{keys:#?}"
+    let dist = workflow("dist.yml");
+    let supersede = dist.job("supersede");
+    assert_eq!(
+        supersede.condition(),
+        Some(format!(
+            "github.event_name == 'pull_request' && \
+             contains(github.event.pull_request.labels.*.name, 'ci:full') && ({LABEL_GATE})"
+        ))
     );
-    assert!(keys.contains(&"continue-on-error: true"), "{keys:#?}");
-    assert!(
-        keys.iter().any(|k| k.starts_with("timeout-minutes: ")),
-        "{keys:#?}"
-    );
-    assert!(!keys.iter().any(|k| k.starts_with("needs:")), "{keys:#?}");
+    assert_eq!(supersede.get("continue-on-error").as_deref(), Some("true"));
+    assert!(supersede.has("timeout-minutes"), "{supersede:#?}");
+    assert!(!supersede.has("needs"), "{supersede:#?}");
 
     // actions: write, for this job alone; the workflow's stays contents: read.
-    let job_permissions: Vec<&str> = DIST_YML
-        .lines()
-        .skip_while(|l| *l != "  supersede:")
-        .skip(1)
-        .take_while(|l| *l != "    steps:")
-        .skip_while(|l| *l != "    permissions:")
-        .skip(1)
-        .take_while(|l| l.starts_with("      "))
-        .map(str::trim)
-        .collect();
-    assert_eq!(job_permissions, ["actions: write"]);
-    let workflow_permissions: Vec<&str> = DIST_YML
-        .lines()
-        .skip_while(|l| *l != "permissions:")
-        .skip(1)
-        .take_while(|l| l.starts_with("  "))
-        .map(str::trim)
-        .collect();
-    assert_eq!(workflow_permissions, ["contents: read"]);
-    for (job, body) in workflow_jobs(DIST_YML) {
-        let keys = dist_job_keys(&job);
+    assert_eq!(grants(&supersede.yaml["permissions"]), ["actions: write"]);
+    assert_eq!(grants(&dist.yaml["permissions"]), ["contents: read"]);
+    for job in dist.jobs() {
         // The bundle job says contents: read itself, and nothing more, so a
         // wider workflow default never reaches the job that assembles the
         // release (the_bundle_job_assembles_the_release_files_without_the_key).
-        if job == "bundle" {
-            let own: Vec<&str> = body
-                .lines()
-                .skip_while(|l| *l != "    permissions:")
-                .skip(1)
-                .take_while(|l| l.starts_with("      "))
-                .map(str::trim)
-                .collect();
-            assert_eq!(own, ["contents: read"], "job {job}");
-        } else if job != "supersede" {
+        if job.id == "bundle" {
+            assert_eq!(
+                grants(&job.yaml["permissions"]),
+                ["contents: read"],
+                "job {}",
+                job.id
+            );
+        } else if job.id != "supersede" {
             assert!(
-                !keys.contains(&"permissions:"),
-                "job {job} asks for more than the workflow's: {keys:#?}"
+                !job.has("permissions"),
+                "job {} asks for more than the workflow's",
+                job.id
             );
         }
-        let needs = keys
-            .iter()
-            .find_map(|k| k.strip_prefix("needs: "))
-            .unwrap_or_default();
-        assert!(!needs.contains("supersede"), "job {job} waits for it");
+        assert!(
+            !job.needs().iter().any(|n| n == "supersede"),
+            "job {} waits for it",
+            job.id
+        );
     }
 
     // What it deletes, and that it never fails.
-    let steps: Vec<Step> = dist_steps()
-        .into_iter()
-        .filter(|s| s.job == "supersede")
-        .collect();
-    assert_eq!(steps.len(), 1, "{steps:#?}");
-    let text = &steps[0].text;
+    let steps = supersede.steps();
+    let [step] = steps.as_slice() else {
+        panic!("{steps:#?}");
+    };
+    assert_eq!(
+        step.env("HEAD_SHA").as_deref(),
+        Some("${{ github.event.pull_request.head.sha }}")
+    );
+    assert_eq!(
+        step.env("RUN_NUMBER").as_deref(),
+        Some("${{ github.run_number }}")
+    );
+    let run = step.run();
     for must in [
-        "HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
-        "RUN_NUMBER: ${{ github.run_number }}",
         "actions/workflows/dist.yml/runs?event=pull_request&head_sha=$HEAD_SHA",
         "select(.path == \".github/workflows/dist.yml\" and .event == \"pull_request\"",
         "and .head_sha == env.HEAD_SHA and .run_number < (env.RUN_NUMBER | tonumber))",
         "for id in $(awk '$2 == \"completed\" && $3 == \"cancelled\" { print $1 }' <<<\"$runs\"); do",
         "if gh run delete \"$id\" --repo \"$GITHUB_REPOSITORY\"; then",
     ] {
-        assert!(text.contains(must), "the job lacks {must:?}: {text}");
+        assert!(run.contains(must), "the job lacks {must:?}: {run}");
     }
-    assert_eq!(text.matches("gh run delete").count(), 1, "{text}");
+    assert_eq!(run.matches("gh run delete").count(), 1, "{run}");
+    let text = step.text();
     for never in ["actions/checkout", "exit 1", "set -e"] {
         assert!(!text.contains(never), "the job has {never:?}: {text}");
     }
@@ -3160,23 +3226,23 @@ fn the_ci_full_run_deletes_only_the_run_it_superseded() {
 /// checked and removed again (msiexec /i, /x) as the setup.exe is.
 #[test]
 fn the_msi_is_required_and_installed_and_removed() {
-    let steps = dist_steps();
-    let windows: Vec<&Step> = steps.iter().filter(|s| s.job == "windows").collect();
+    let dist = workflow("dist.yml");
+    let windows = dist.job("windows").steps();
     let locate = windows
         .iter()
-        .find(|s| s.name == "Locate built artifacts")
-        .expect("the windows job locates its installers");
+        .find(|s| s.name() == "Locate built artifacts")
+        .expect("the windows job locates its installers")
+        .run();
     assert!(
-        locate
-            .text
-            .contains("Write-Error \"cargo tauri build did not produce an MSI"),
-        "{locate:#?}"
+        locate.contains("Write-Error \"cargo tauri build did not produce an MSI"),
+        "{locate}"
     );
-    assert!(!locate.text.contains("Write-Warning"), "{locate:#?}");
+    assert!(!locate.contains("Write-Warning"), "{locate}");
     let smoke = windows
         .iter()
-        .find(|s| s.name.contains("(MSI)"))
-        .expect("the windows job smoke-tests the MSI");
+        .find(|s| s.name().contains("(MSI)"))
+        .expect("the windows job smoke-tests the MSI")
+        .run();
     for needle in [
         "msiexec.exe -ArgumentList \"/i\"",
         "msiexec.exe -ArgumentList \"/x\"",
@@ -3185,17 +3251,14 @@ fn the_msi_is_required_and_installed_and_removed() {
         "gospel-getter-cli.exe",
         "--version",
     ] {
-        assert!(smoke.text.contains(needle), "{needle}: {smoke:#?}");
+        assert!(smoke.contains(needle), "{needle}: {smoke}");
     }
     let upload = windows
         .iter()
-        .find(|s| {
-            s.text
-                .contains("name: gospel-getter-windows-msi-installer\n")
-        })
+        .find(|s| s.with("name").as_deref() == Some("gospel-getter-windows-msi-installer"))
         .expect("the windows job uploads the MSI");
     assert!(
-        !upload.text.contains("        if:"),
+        !upload.has("if"),
         "the MSI's upload is conditional: {upload:#?}"
     );
 }
@@ -3211,58 +3274,54 @@ fn the_msi_is_required_and_installed_and_removed() {
 /// limit of their own: no pull request waits for them.
 #[test]
 fn ci_runs_the_doc_tests_both_clippys_and_locked_builds() {
-    let ci = workflow_steps(CI_YML);
+    let ci = workflow("ci.yml");
+    let steps = ci.steps();
     let runs = |job: &str, command: &str| {
-        ci.iter()
-            .any(|s| s.job == job && s.text.lines().any(|l| l.trim_end().ends_with(command)))
+        steps
+            .iter()
+            .any(|s| s.job == job && s.commands().iter().any(|l| l.trim() == command))
     };
     for job in ["build-and-test", "test-windows"] {
-        assert!(runs(job, "run: cargo test --doc"), "job {job}");
-        assert!(runs(job, "run: cargo test --all-targets"), "job {job}");
+        assert!(runs(job, "cargo test --doc"), "job {job}");
+        assert!(runs(job, "cargo test --all-targets"), "job {job}");
     }
     assert!(runs(
         "build-and-test",
-        "run: cargo clippy --all-targets --all-features -- -D warnings"
+        "cargo clippy --all-targets --all-features -- -D warnings"
     ));
     assert!(runs(
         "build-and-test",
-        "run: cargo clippy --all-targets -- -D warnings"
+        "cargo clippy --all-targets -- -D warnings"
     ));
 
-    let ignored: Vec<(usize, &Step)> = ci
+    let ignored: Vec<(usize, &Step)> = steps
         .iter()
         .enumerate()
-        .filter(|(_, s)| s.text.contains("--ignored"))
+        .filter(|(_, s)| s.text().contains("--ignored"))
         .collect();
     let [(at, sweep)] = ignored.as_slice() else {
         panic!("one step should run the ignored tests: {ignored:#?}");
     };
     assert_eq!(sweep.job, "build-and-test", "{sweep:#?}");
     assert!(
-        sweep
-            .text
-            .contains("        run: cargo test -p gospel-getter-cli -- --ignored\n")
-            && sweep.text.contains(
-                "        if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"
-            )
-            && sweep
-                .text
-                .lines()
-                .any(|l| l.starts_with("        timeout-minutes: ")),
+        sweep.run().trim() == "cargo test -p gospel-getter-cli -- --ignored"
+            && sweep.condition().as_deref()
+                == Some("github.event_name == 'push' && github.ref == 'refs/heads/main'")
+            && sweep.has("timeout-minutes"),
         "{sweep:#?}"
     );
-    let tests = ci
+    let tests = steps
         .iter()
-        .position(|s| s.job == "build-and-test" && s.name == "Test")
+        .position(|s| s.job == "build-and-test" && s.name() == "Test")
         .expect("build-and-test's Test step");
     assert!(tests < *at, "the sweep runs before the other tests");
 
     let mut ui_steps = 0;
-    for step in ci
+    for step in steps
         .iter()
-        .filter(|s| s.text.contains("working-directory: ui-leptos"))
+        .filter(|s| s.get("working-directory").as_deref() == Some("ui-leptos"))
     {
-        for line in step.text.lines().filter(|l| l.contains("cargo ")) {
+        for line in step.commands().iter().filter(|l| l.contains("cargo ")) {
             ui_steps += 1;
             assert!(
                 line.contains("cargo fmt") || line.contains(" --locked"),
@@ -3289,20 +3348,22 @@ fn ci_runs_the_doc_tests_both_clippys_and_locked_builds() {
         );
     }
 
-    let gui = |steps: &[Step], job: &str| {
-        let step = steps
-            .iter()
-            .find(|s| s.job == job && s.text.contains("working-directory: tests/gui"))
+    let gui = |file: &GithubFile, job: &str| {
+        let step = file
+            .job(job)
+            .steps()
+            .into_iter()
+            .find(|s| s.get("working-directory").as_deref() == Some("tests/gui"))
             .unwrap_or_else(|| panic!("job {job} doesn't check tests/gui"));
+        let commands = step.commands();
+        let has = |command: &str| commands.iter().any(|l| l.trim_end().ends_with(command));
         assert!(
-            step.text
-                .contains("cargo clippy --locked --all-targets -- -D warnings\n")
-                && step.text.contains("cargo test --locked\n"),
+            has("cargo clippy --locked --all-targets -- -D warnings") && has("cargo test --locked"),
             "{step:#?}"
         );
     };
     gui(&ci, "test-windows");
-    gui(&dist_steps(), "gui-linux");
+    gui(&workflow("dist.yml"), "gui-linux");
 }
 
 /// The page asks Tauri for nothing but the app's own commands
@@ -3345,7 +3406,7 @@ fn the_page_gets_no_permissions() {
 
 /// The committed-bytes check, the step every job that builds or tests the
 /// app runs right after its checkout (see tools/ci/committed_bytes.py).
-const COMMITTED_BYTES: &str = "uses: ./.github/actions/committed-bytes";
+const COMMITTED_BYTES: &str = "./.github/actions/committed-bytes";
 
 /// Every job in ci.yml and dist.yml that checks out the repository runs the
 /// committed-bytes check as its very next step, unconditionally, so nothing
@@ -3358,35 +3419,43 @@ fn every_build_and_test_job_first_checks_its_checkout_is_the_committed_bytes() {
     // signing path stays as it is.
     const BUILD_NOTHING: [&str; 3] = ["sign", "sign-rehearsal", "bundle"];
     let mut checked = Vec::new();
-    for (file, workflow) in [("ci.yml", CI_YML), ("dist.yml", DIST_YML)] {
-        let steps = workflow_steps(workflow);
-        for (job, _) in workflow_jobs(workflow) {
-            let own: Vec<&Step> = steps.iter().filter(|s| s.job == job).collect();
+    for file in ["ci.yml", "dist.yml"] {
+        let workflow = workflow(file);
+        for job in workflow.jobs() {
+            let own = job.steps();
             let checkout = own
                 .iter()
-                .position(|s| s.text.contains("uses: actions/checkout@"));
-            let check = own.iter().position(|s| s.text.contains(COMMITTED_BYTES));
-            if BUILD_NOTHING.contains(&job.as_str()) {
-                assert!(checkout.is_some(), "{file}: {job} checks out nothing");
+                .position(|s| s.action().as_deref() == Some("actions/checkout"));
+            let check = own
+                .iter()
+                .position(|s| s.get("uses").as_deref() == Some(COMMITTED_BYTES));
+            if BUILD_NOTHING.contains(&job.id) {
+                assert!(checkout.is_some(), "{file}: {} checks out nothing", job.id);
                 continue;
             }
             let Some(at) = checkout else {
-                assert_eq!(check, None, "{file}: {job} checks a checkout it hasn't");
+                assert_eq!(
+                    check, None,
+                    "{file}: {} checks a checkout it hasn't",
+                    job.id
+                );
                 continue;
             };
             assert_eq!(
                 check,
                 Some(at + 1),
-                "{file}: {job}'s next step after its checkout should be `{COMMITTED_BYTES}`"
+                "{file}: {}'s next step after its checkout should be `{COMMITTED_BYTES}`",
+                job.id
             );
             let step = own[at + 1];
-            for key in ["if:", "continue-on-error:", "with:"] {
+            for key in ["if", "continue-on-error", "with"] {
                 assert!(
-                    !step.text.contains(&format!("        {key}")),
-                    "{file}: {job}'s check has {key}: {step:#?}"
+                    !step.has(key),
+                    "{file}: {}'s check has {key}: {step:#?}",
+                    job.id
                 );
             }
-            checked.push(format!("{file}: {job}"));
+            checked.push(format!("{file}: {}", job.id));
         }
     }
     assert_eq!(
@@ -3408,21 +3477,24 @@ fn every_build_and_test_job_first_checks_its_checkout_is_the_committed_bytes() {
 
     let action = github_files()
         .into_iter()
-        .find(|(name, _)| name == "actions/committed-bytes/action.yml")
-        .map(|(_, text)| text)
+        .find(|f| f.name == "actions/committed-bytes/action.yml")
         .expect(".github/actions/committed-bytes/action.yml");
-    let code: Vec<&str> = action
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    let commands: Vec<String> = code(&action.yaml)
+        .iter()
+        .map(|l| l.trim().to_owned())
+        .filter(|l| !l.is_empty())
         .collect();
     assert!(
-        code.contains(
-            &"\"$py\" \"$GITHUB_WORKSPACE/tools/ci/committed_bytes.py\" \"$GITHUB_WORKSPACE\""
-        ),
-        "{action}"
+        commands.iter().any(|l| l
+            == "\"$py\" \"$GITHUB_WORKSPACE/tools/ci/committed_bytes.py\" \"$GITHUB_WORKSPACE\""),
+        "{}",
+        action.text
     );
-    assert!(!action.contains("continue-on-error"), "{action}");
+    assert!(
+        every(&action.yaml, "continue-on-error").is_empty(),
+        "{}",
+        action.text
+    );
 }
 
 /// ci.yml's job that tests each platform, and dist.yml's job that builds
@@ -3442,6 +3514,7 @@ struct AllowedDifference {
 }
 
 const LINT_TOOLS: &str = "the lint tools CI runs; they change nothing rustc builds";
+
 const CI_CARGO_CONFIG: &str = "it sets only debug and test builds' profile, which no release build \
      reads (ci_tests_what_the_release_jobs_build checks it)";
 const PACKAGES: &str = "CI tests the workspace's default members together, the release builds \
@@ -3542,62 +3615,39 @@ type BuildSetup = std::collections::BTreeMap<String, std::collections::BTreeSet<
 /// packages and features of its app builds (the cargo build, test and tauri
 /// build commands it runs in src-tauri). Panics on a git config step, which
 /// no build job may have (see every_checkout_keeps_the_committed_line_endings).
-fn build_setup(workflow: &str, job: &str) -> BuildSetup {
+fn build_setup(file: &GithubFile, job: &str) -> BuildSetup {
     let mut setup = BuildSetup::default();
     let mut add = |what: &str, value: String| {
         setup.entry(what.to_owned()).or_default().insert(value);
     };
-    let (_, job_text) = workflow_jobs(workflow)
-        .into_iter()
-        .find(|(id, _)| id == job)
-        .unwrap_or_else(|| panic!("no job {job}"));
-    let steps: Vec<Step> = workflow_steps(workflow)
-        .into_iter()
-        .filter(|s| s.job == job)
-        .collect();
-    // A step's own lines, without comments: a job's last step's text runs
-    // on into the next job's keys (see workflow_steps), at fewer spaces.
-    let code = |text: &str| -> Vec<String> {
-        text.lines()
-            .take_while(|l| l.is_empty() || l.starts_with("      "))
-            .filter(|l| !l.trim_start().starts_with('#'))
-            .map(|l| l.trim_end().to_owned())
-            .collect()
-    };
+    let job = file.job(job);
+    let steps = job.steps();
 
-    for key in job_keys(workflow, job) {
-        if let Some(runner) = key.strip_prefix("runs-on: ") {
-            add("runs-on", runner.to_owned());
-        }
+    if let Some(runner) = job.get("runs-on") {
+        add("runs-on", runner);
     }
 
     let checkouts: Vec<&Step> = steps
         .iter()
-        .filter(|s| s.text.contains("uses: actions/checkout@"))
+        .filter(|s| s.action().as_deref() == Some("actions/checkout"))
         .collect();
     let [checkout] = checkouts.as_slice() else {
-        panic!("{job}: one checkout: {checkouts:#?}");
+        panic!("{}: one checkout: {checkouts:#?}", job.id);
     };
-    add(
-        "checkout",
-        code(&checkout.text).join("\n").trim().to_owned(),
-    );
+    add("checkout", flow(checkout.yaml));
 
     let installs: Vec<&Step> = steps
         .iter()
-        .filter(|s| s.text.contains("uses: dtolnay/rust-toolchain@"))
+        .filter(|s| s.action().as_deref() == Some("dtolnay/rust-toolchain"))
         .collect();
     let [install] = installs.as_slice() else {
-        panic!("{job}: one Rust install: {installs:#?}");
+        panic!("{}: one Rust install: {installs:#?}", job.id);
     };
-    for line in code(&install.text) {
-        let line = line.trim_start_matches(' ');
-        if let Some(action) = line.strip_prefix("uses: ") {
-            add("rust action", action.to_owned());
+    add("rust action", install.get("uses").unwrap_or_default());
+    for (key, value) in entries(&install.yaml["with"]) {
+        if let Some(value) = scalar(value) {
+            add(&format!("rust {key}"), value);
         }
-    }
-    for (key, value) in block(&install.text, 8, "with") {
-        add(&format!("rust {key}"), value);
     }
 
     let built_with = |name: &str| {
@@ -3605,57 +3655,54 @@ fn build_setup(workflow: &str, job: &str) -> BuildSetup {
             .iter()
             .any(|prefix| name.starts_with(prefix))
     };
-    for (name, value) in block(workflow, 0, "env")
+    for (name, value) in entries(&file.yaml["env"])
         .into_iter()
-        .chain(block(&job_text, 4, "env"))
+        .chain(entries(&job.yaml["env"]))
     {
-        if built_with(&name) {
+        if built_with(&name)
+            && let Some(value) = scalar(value)
+        {
             add(&format!("env {name}"), value);
         }
     }
     for step in &steps {
-        for (name, value) in block(&step.text, 8, "env") {
-            if built_with(&name) {
+        for (name, value) in entries(&step.yaml["env"]) {
+            if built_with(&name)
+                && let Some(value) = scalar(value)
+            {
                 add(
                     &format!("env {name}"),
-                    format!("{value} (step: {})", step.name),
+                    format!("{value} (step: {})", step.name()),
                 );
             }
         }
     }
 
-    let defaults = "    defaults:\n      run:\n        working-directory: src-tauri\n";
-    let default_dir = if job_text.contains(defaults) {
-        "src-tauri"
-    } else {
-        "."
-    };
+    let default_dir =
+        scalar(&job.yaml["defaults"]["run"]["working-directory"]).unwrap_or_else(|| ".".to_owned());
     for step in &steps {
-        let lines = code(&step.text);
-        for line in &lines {
-            assert!(
-                !line.contains("git config") && !line.contains("git -c "),
-                "{job}: a git config step: {step:#?}"
-            );
+        let code = step.code();
+        assert!(
+            !code.contains("git config") && !code.contains("git -c "),
+            "{}: a git config step: {step:#?}",
+            job.id
+        );
+        let commands = step.commands();
+        for line in &commands {
             if let Some((cat, into)) = line.trim_start().split_once(" >> ")
-                && let Some(file) = cat.strip_prefix("run: cat ").or(cat.strip_prefix("cat "))
+                && let Some(file) = cat.strip_prefix("cat ")
                 && into.contains("CARGO_HOME")
                 && into.ends_with("config.toml\"")
             {
                 add("cargo config", format!("{file} into CARGO_HOME"));
             }
         }
-        let dir = lines
-            .iter()
-            .find_map(|l| l.strip_prefix("        working-directory: "))
-            .unwrap_or(default_dir);
-        for line in &lines {
+        let dir = step
+            .get("working-directory")
+            .unwrap_or_else(|| default_dir.clone());
+        for line in &commands {
             // A command, not a message that names one.
-            let line = line.trim_start();
-            let Some(command) = line
-                .strip_prefix("run: cargo ")
-                .or(line.strip_prefix("cargo "))
-            else {
+            let Some(command) = line.trim_start().strip_prefix("cargo ") else {
                 continue;
             };
             // Cargo's own arguments: `cargo tauri build` hands those after
@@ -3714,22 +3761,6 @@ fn build_setup(workflow: &str, job: &str) -> BuildSetup {
     setup
 }
 
-/// The `key: value` lines of the `name:` block at `indent` in `text`, the
-/// first one there, without quotes. A block given as `name: |` or a nested
-/// map is left out.
-fn block(text: &str, indent: usize, name: &str) -> Vec<(String, String)> {
-    let header = format!("{}{name}:", " ".repeat(indent));
-    let inner = " ".repeat(indent + 2);
-    text.lines()
-        .skip_while(|l| *l != header)
-        .skip(1)
-        .take_while(|l| l.is_empty() || l.starts_with(&inner))
-        .filter(|l| !l.starts_with(&format!("{inner} ")) && !l.trim_start().starts_with('#'))
-        .filter_map(|l| l.trim().split_once(": "))
-        .map(|(k, v)| (k.to_owned(), v.trim_matches('"').to_owned()))
-        .collect()
-}
-
 /// CI tests what the release builds (H3): each platform's test job prepares
 /// its build as that platform's release job does (the checkout, the Rust,
 /// every variable rustc, cargo or the app's build reads, the cargo config,
@@ -3743,9 +3774,10 @@ fn block(text: &str, indent: usize, name: &str) -> Vec<(String, String)> {
 fn ci_tests_what_the_release_jobs_build() {
     let mut unexplained = Vec::new();
     let mut used = std::collections::BTreeSet::new();
+    let (ci_yml, dist_yml) = (workflow("ci.yml"), workflow("dist.yml"));
     for (ci_job, release_job) in TESTED_RELEASES {
-        let ci = build_setup(CI_YML, ci_job);
-        let release = build_setup(DIST_YML, release_job);
+        let ci = build_setup(&ci_yml, ci_job);
+        let release = build_setup(&dist_yml, release_job);
         let keys: std::collections::BTreeSet<&String> = ci.keys().chain(release.keys()).collect();
         for what in keys {
             let shown = |setup: &BuildSetup| {
@@ -3811,15 +3843,8 @@ fn ci_tests_what_the_release_jobs_build() {
     }
 
     for (_, release_job) in TESTED_RELEASES {
-        for step in workflow_steps(DIST_YML)
-            .iter()
-            .filter(|s| s.job == release_job)
-        {
-            for line in step
-                .text
-                .lines()
-                .filter(|l| !l.trim_start().starts_with('#'))
-            {
+        for step in dist_yml.job(release_job).steps() {
+            for line in step.commands() {
                 if line.contains("cargo build") {
                     assert!(line.contains("--release"), "{release_job}: {line}");
                 }
@@ -3837,10 +3862,11 @@ fn ci_tests_what_the_release_jobs_build() {
 /// committed (the reason is above that rule).
 #[test]
 fn every_checkout_keeps_the_committed_line_endings() {
-    for (name, text) in github_files() {
+    for file in github_files() {
         assert!(
-            !text.to_ascii_lowercase().contains("autocrlf"),
-            "{name} sets core.autocrlf"
+            !file.text.to_ascii_lowercase().contains("autocrlf"),
+            "{} sets core.autocrlf",
+            file.name
         );
     }
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
