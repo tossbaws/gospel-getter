@@ -22,7 +22,8 @@ pub struct AppState {
     /// the default used when a command doesn't specify one.
     pub translations: Vec<Translation>,
     /// Progress of the search index build, which runs in the background
-    /// after startup (see `main.rs`) rather than holding up the window.
+    /// after startup (see `spawn_search_index_build` in `lib.rs`) rather
+    /// than holding up the window.
     pub search_index: Arc<SearchIndexStatus>,
     /// The import file the reader is previewing, validated and waiting for
     /// them to confirm (or cancel). Only one at a time; choosing another
