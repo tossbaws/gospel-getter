@@ -1,8 +1,8 @@
-// Guards the app icon against drift: every shipped raster (the packaging
-// PNG, the Tauri PNGs, every ICO frame, every PNG in the ICNS, the favicon)
+// Guards the icon against drift: every shipped raster (the packaging PNG,
+// the Tauri PNGs, every ICO frame, every PNG in the ICNS, the webview
+// favicon, and the website's favicons, header icon and Apple touch icon)
 // must be what packaging/generate_icons.py made from the one source,
-// packaging/icon-source.png, in the style its size calls for (see the
-// generator's header).
+// packaging/icon-source.png: the detailed stained-glass mark, at every size.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,7 +18,6 @@ const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 // The Captain's C2 Chi-Rho, byte for byte:
 // Brand_Attempts/2026-10-05_brand_chi-rho_C2_circuit-reliquary_polish.png.
 const SOURCE_SHA256 = 'a38236d8300c2df06a0be3a95b84b0e7f7f58365a9c8bc34ad48346dbfc997c7';
-const SMALLEST_DETAILED = 48;
 const PNGS = {
     'packaging/icon.png': 512,
     'src-tauri/icons/32x32.png': 32,
@@ -27,8 +26,20 @@ const PNGS = {
     'src-tauri/icons/128x128@2x.png': 256,
     'src-tauri/icons/icon.png': 512,
     'ui/favicon.png': 128,
+    'site/assets/brand/chirho-code-mark-16.png': 16,
+    'site/assets/brand/chirho-code-mark-32.png': 32,
+    'site/assets/brand/chirho-code-mark-48.png': 48,
+    'site/assets/brand/chirho-code-mark-64.png': 64,
+    'site/assets/brand/chirho-code-mark-180.png': 180,
 };
 const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 256];
+const SITE_ICO_SIZES = [16, 32, 48, 64];
+// generate_icons.py's SHARPEN_BELOW: smaller frames get its unsharp mask.
+const SHARPEN_BELOW = 48;
+// The sharpened 16 to 40 px frames differ from the master's box average by
+// 0.05 to 0.06, and a flat redrawing of the mark at those sizes by 0.15 or
+// more, so this still tells the detailed mark from another drawing.
+const SHARPENED_LIMIT = 0.08;
 const ICNS_SIZES = { ic07: 128, ic08: 256, ic09: 512, ic10: 1024, ic11: 32, ic12: 64, ic13: 256, ic14: 512 };
 
 const source = decodePng(bytes('packaging/icon-source.png'));
@@ -76,9 +87,10 @@ function difference(a, b, n) {
 
 /**
  * Checks one raster: its size; the round window with transparent corners;
- * and its style. From 48 px it is the detailed mark (the 512px master,
- * stained glass and all); below, the flat-small glyph (gold on two dark
- * panes, no cyan glass), which looks nothing like the master.
+ * and that it is the detailed mark (the 512px master, stained glass and
+ * all), at every size. The frames below SHARPEN_BELOW are sharpened, so
+ * they may stray a little further from the master's box average. The cyan
+ * glass is there at every size.
  */
 function assertIconRaster(name, image, size) {
     assert.equal(image.width, size, `${name} width`);
@@ -90,7 +102,6 @@ function assertIconRaster(name, image, size) {
     let opaque = 0;
     let cyan = 0;
     let gold = 0;
-    let bluest = 0;
     for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
             const i = (y * size + x) * 4;
@@ -102,8 +113,10 @@ function assertIconRaster(name, image, size) {
             else if (distance > 0.52 * size) assert.ok(a <= 4, `${name}: (${x}, ${y}) is outside the window (alpha ${a})`);
             if (a < 255) continue;
             opaque++;
-            bluest = Math.max(bluest, b);
-            if (g > 170 && b > 170 && r < 120) cyan++;
+            // Cyan glass, not the emerald panes or the gold. At 16 px the
+            // glass averages with its dark lead lines, so the cut sits low
+            // enough that it still counts there (6.5% of the window).
+            if (g > 150 && b > 150 && r < 120) cyan++;
             if (r > 230 && g > 180 && b < 140) gold++;
         }
     }
@@ -112,14 +125,9 @@ function assertIconRaster(name, image, size) {
     assert.ok(gold > 0, `${name}: the gold glyph`);
 
     const off = difference(downsample(image, Math.min(size, 512)), downsample(master, Math.min(size, 512)), Math.min(size, 512));
-    if (size >= SMALLEST_DETAILED) {
-        assert.ok(off < 0.04, `${name} is the detailed mark (differs from packaging/icon.png by ${off.toFixed(3)})`);
-        assert.ok(cyan > 0.04 * opaque, `${name} has the cyan glass (${cyan} of ${opaque} pixels)`);
-    } else {
-        assert.ok(off > 0.1, `${name} is the flat glyph, not the detailed mark (${off.toFixed(3)})`);
-        assert.equal(cyan, 0, `${name}: no cyan glass in the flat glyph`);
-        assert.ok(bluest < 160, `${name}: the flat glyph's panes are dark (bluest ${bluest})`);
-    }
+    const limit = size < SHARPEN_BELOW ? SHARPENED_LIMIT : 0.04;
+    assert.ok(off < limit, `${name} is the detailed mark (differs from packaging/icon.png by ${off.toFixed(3)})`);
+    assert.ok(cyan > 0.04 * opaque, `${name} has the cyan glass (${cyan} of ${opaque} pixels)`);
 }
 
 test('the icon source is the C2 Chi-Rho brand mark, as approved', () => {
@@ -142,7 +150,7 @@ test('the generated icons are up to date with the source', () => {
         'icon-source.png changed since packaging/generate_icons.py last ran');
     assert.deepEqual(
         manifest.slice(1).map(([, path]) => path),
-        [...Object.keys(PNGS), 'src-tauri/icons/icon.icns', 'src-tauri/icons/icon.ico'].sort(),
+        [...Object.keys(PNGS), 'src-tauri/icons/icon.icns', 'src-tauri/icons/icon.ico', 'site/assets/brand/favicon.ico'].sort(),
         'the generator writes every shipped icon, and nothing else',
     );
     for (const [hash, path] of manifest.slice(1)) {
@@ -154,10 +162,16 @@ test('every PNG icon is the mark at its size', () => {
     for (const [path, size] of Object.entries(PNGS)) assertIconRaster(path, decodePng(bytes(path)), size);
 });
 
-test('the Windows ICO has every size Windows asks for, flat below 48 px and detailed from 48', () => {
+test('the Windows ICO has every size Windows asks for, each the detailed mark', () => {
     const frames = icoFrames(bytes('src-tauri/icons/icon.ico'));
     assert.deepEqual(frames.map((f) => f.size), ICO_SIZES);
     for (const { size, png } of frames) assertIconRaster(`icon.ico ${size}px`, decodePng(png), size);
+});
+
+test('the site\'s favicon.ico has 16 to 64 px, each the detailed mark', () => {
+    const frames = icoFrames(bytes('site/assets/brand/favicon.ico'));
+    assert.deepEqual(frames.map((f) => f.size), SITE_ICO_SIZES);
+    for (const { size, png } of frames) assertIconRaster(`site favicon.ico ${size}px`, decodePng(png), size);
 });
 
 test('the macOS ICNS PNG entries are the mark at each size', () => {
@@ -176,6 +190,7 @@ test('a size is the same image in every file that has it', () => {
     };
     for (const path of Object.keys(PNGS)) add(path, decodePng(bytes(path)));
     for (const { size, png } of icoFrames(bytes('src-tauri/icons/icon.ico'))) add(`icon.ico ${size}px`, decodePng(png));
+    for (const { size, png } of icoFrames(bytes('site/assets/brand/favicon.ico'))) add(`site favicon.ico ${size}px`, decodePng(png));
     for (const { type, data } of icnsEntries(bytes('src-tauri/icons/icon.icns'))) {
         if (data.subarray(1, 4).toString('latin1') === 'PNG') add(`icon.icns ${type}`, decodePng(data));
     }
@@ -208,8 +223,14 @@ test('the webview favicon is the 128px icon, served from the frontend', () => {
     }
 });
 
-test('nothing points at the old SVG icon or its script', () => {
-    const gone = ['packaging/icon.svg', 'packaging/icon.svg.sha256', 'packaging/generate-icons.sh'];
+test('nothing points at the old SVG icon, its script, or the flat icon script', () => {
+    const gone = [
+        'packaging/icon.svg',
+        'packaging/icon.svg.sha256',
+        'packaging/generate-icons.sh',
+        // generate_icons.py writes the site's icons too, from the same frames.
+        'tools/site/build_brand_icons.py',
+    ];
     for (const path of gone) assert.ok(!existsSync(new URL(path, root)), `${path} is gone`);
     // Everything that builds, packages or describes the app; the changelog
     // keeps its history, and this file names them to check for them.
@@ -224,7 +245,7 @@ test('nothing points at the old SVG icon or its script', () => {
             else if (/\.(rs|mjs|js|html|md|sh|py|json|toml|yml|nsh|txt)$|PKGBUILD$/.test(name)) files.push(path);
         }
     };
-    for (const dir of ['ui/', 'ui-leptos/', 'packaging/', 'tests/', 'scripts/', 'src-tauri/', 'tools/', '.github/']) walk(dir);
+    for (const dir of ['ui/', 'ui-leptos/', 'packaging/', 'tests/', 'scripts/', 'src-tauri/', 'tools/', '.github/', 'site/']) walk(dir);
     files.push('README.md', 'CLAUDE.md', 'Trunk.toml');
     for (const path of files) {
         if (new URL(path, root).pathname === self) continue;

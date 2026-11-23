@@ -119,35 +119,68 @@ test('images have alt text and dimensions', () => {
 
 test('the Chi Rho Code LLC mark is the favicon and the header icon, and only there and in About', () => {
     const { document } = pages.find((p) => p.name === 'index.html');
-    // Favicons: the flat mark at every size, an .ico holding 16–64, and a
-    // 180px Apple touch icon. The small sizes use the bolder flat-small mark.
+    // Favicons: the detailed mark at every size, an .ico holding 16–64, and
+    // a 180px Apple touch icon, all written by packaging/generate_icons.py.
     const icons = [...document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]')]
         .map((l) => [l.getAttribute('rel'), l.getAttribute('sizes'), l.getAttribute('href')]);
     assert.deepEqual(icons, [
         ['icon', '16x16 32x32 48x48 64x64', 'assets/brand/favicon.ico'],
-        ['icon', '16x16', 'assets/brand/chirho-code-flat-small-16.png'],
-        ['icon', '32x32', 'assets/brand/chirho-code-flat-small-32.png'],
-        ['icon', '48x48', 'assets/brand/chirho-code-flat-48.png'],
-        ['icon', '64x64', 'assets/brand/chirho-code-flat-64.png'],
-        ['apple-touch-icon', '180x180', 'assets/brand/chirho-code-flat-180.png'],
+        ['icon', '16x16', 'assets/brand/chirho-code-mark-16.png'],
+        ['icon', '32x32', 'assets/brand/chirho-code-mark-32.png'],
+        ['icon', '48x48', 'assets/brand/chirho-code-mark-48.png'],
+        ['icon', '64x64', 'assets/brand/chirho-code-mark-64.png'],
+        ['apple-touch-icon', '180x180', 'assets/brand/chirho-code-mark-180.png'],
     ]);
-    // The header brand icon, crisp at 2x.
-    const brand = document.querySelector('.brand > img');
-    assert.equal(brand.getAttribute('src'), 'assets/brand/chirho-code-flat-48.png');
-    assert.match(brand.getAttribute('srcset'), /chirho-code-flat-180\.png 2x/);
-    assert.equal(brand.getAttribute('alt'), '');
+    // The guide's head carries the same .ico, 32 and Apple touch icon.
+    const guide = pages.find((p) => p.name === 'guide.html').document;
+    assert.deepEqual(
+        [...guide.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]')].map((l) => l.getAttribute('href')),
+        ['assets/brand/favicon.ico', 'assets/brand/chirho-code-mark-32.png', 'assets/brand/chirho-code-mark-180.png'],
+    );
+    // The header brand icon, crisp at 2x, on both pages.
+    for (const doc of [document, guide]) {
+        const brand = doc.querySelector('.brand > img');
+        assert.equal(brand.getAttribute('src'), 'assets/brand/chirho-code-mark-48.png');
+        assert.equal(brand.getAttribute('srcset'), 'assets/brand/chirho-code-mark-48.png 1x, assets/brand/chirho-code-mark-180.png 2x');
+        assert.equal(brand.getAttribute('alt'), '');
+    }
     // So is the footer: no mark, no Alpha and Omega, just the credit.
     const footer = document.querySelector('.site-footer');
     assert.equal(footer.querySelectorAll('img, .ornament').length, 0);
     assert.ok(
         [...footer.querySelectorAll('p')].some((p) => p.textContent === 'Gospel Getter is made by Chi Rho Code LLC and released under the MIT license.'),
     );
-    // The app's icon is the same mark: its 16 and 32 px frames are these
-    // favicons, pixel for pixel (both drawn by tools/site/build_brand_icons.py).
+    // The app's icon is the same mark: its 16 to 64 px frames are these
+    // favicons and the .ico's frames, pixel for pixel (packaging/
+    // generate_icons.py writes both; tests/frontend/icons.test.mjs checks
+    // every one is the detailed mark).
     const appFrames = new Map(icoFrames(readFileSync(new URL('src-tauri/icons/icon.ico', root))).map((f) => [f.size, f.png]));
-    for (const size of [16, 32]) {
-        const favicon = decodePng(readFileSync(new URL(`assets/brand/chirho-code-flat-small-${size}.png`, site)));
-        assert.ok(favicon.rgba.equals(decodePng(appFrames.get(size)).rgba), `the app's ${size}px icon is the site's`);
+    const siteFrames = new Map(icoFrames(readFileSync(new URL('assets/brand/favicon.ico', site))).map((f) => [f.size, f.png]));
+    assert.deepEqual([...siteFrames.keys()], [16, 32, 48, 64]);
+    for (const size of [16, 32, 48, 64]) {
+        const favicon = decodePng(readFileSync(new URL(`assets/brand/chirho-code-mark-${size}.png`, site)));
+        const app = decodePng(appFrames.get(size));
+        assert.ok(favicon.rgba.equals(app.rgba), `the app's ${size}px icon is the site's`);
+        assert.ok(decodePng(siteFrames.get(size)).rgba.equals(app.rgba), `the site's favicon.ico ${size}px is the app's`);
+    }
+    // The Apple touch icon (and the header's 2x) is the detailed mark too:
+    // the round window with clear corners, and its cyan glass.
+    const touch = decodePng(readFileSync(new URL('assets/brand/chirho-code-mark-180.png', site)));
+    assert.deepEqual([touch.width, touch.height], [180, 180]);
+    let opaque = 0;
+    let cyan = 0;
+    for (let i = 0; i < touch.rgba.length; i += 4) {
+        const [r, g, b, a] = touch.rgba.subarray(i, i + 4);
+        if (a < 255) continue;
+        opaque++;
+        if (g > 150 && b > 150 && r < 120) cyan++;
+    }
+    assert.equal(touch.rgba[3], 0, 'the Apple touch icon\'s corner is transparent');
+    assert.ok(cyan > 0.04 * opaque, `the Apple touch icon has the cyan glass (${cyan} of ${opaque} pixels)`);
+    // No flat drawing of the mark ships, and nothing on the site names one.
+    assert.deepEqual(readdirSync(new URL('assets/brand/', site)).filter((name) => name.includes('flat')), []);
+    for (const name of ['index.html', 'guide.html', 'brand.css', 'gospel-getter.css', 'README.md']) {
+        assert.ok(!readFileSync(new URL(name, site), 'utf8').includes('chirho-code-flat'), `site/${name} names a flat icon`);
     }
     // One mark in the header: the byline is text only.
     assert.equal(document.querySelector('.brand-byline').textContent, 'by Chi Rho Code LLC');

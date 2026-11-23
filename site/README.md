@@ -117,38 +117,34 @@ same rule.
 ## Brand: Chi Rho Code LLC
 
 The Chi Rho Code LLC mark is the site's icon: the favicon (and Apple touch
-icon) and the header beside "Gospel Getter", as the flat mark. It also
-appears, large, in "About the maker" (the detailed mark). The byline under
-"Gospel Getter" and the footer are text only. The
-site's look follows the mark, a round stained-glass window with
-circuit-trace lead lines. The Gospel Getter app's icon is the same mark
-(`packaging/generate_icons.py`): the detailed mark at 48 px and up, and at
-16 and 32 px the same flat-small frames as these favicons.
+icon) and the header beside "Gospel Getter". It also appears, large, in
+"About the maker". The byline under "Gospel Getter" and the footer are text
+only. The site's look follows the mark, a round stained-glass window with
+circuit-trace lead lines. Every one of these is the same detailed
+stained-glass drawing, and the Gospel Getter app's icon is too: the site's
+icons and the app's are written together by `packaging/generate_icons.py`,
+from the same frames (see its header, which also says why the frames below
+48 px are lightly sharpened).
 
 The Chi-Rho, Alpha (Α) and Omega (Ω) are public-domain symbols. The Alpha
 and Omega ornaments beside the About heading are text, hidden from
 assistive technology.
 
-**Assets in `assets/brand/`**, all derived locally: the WebP marks with
-ImageMagick 7, the flat PNGs and `favicon.ico` with
-`tools/site/build_brand_icons.py`. The brand source art isn't committed; the
-sources below are paths in its `Brand_Attempts/` folder:
+**Assets in `assets/brand/`**, all derived locally from
+`Brand_Attempts/2026-10-05_brand_chi-rho_C2_circuit-reliquary_polish.png`
+(2048×2048, the final mark), which is committed as `packaging/icon-source.png`:
 
-| File | Size | Source and derivation |
+| File | Size | Derivation and use |
 |---|---|---|
-| `chirho-code-mark-240.webp`, `chirho-code-mark-480.webp` | 240 and 480 px (1x/2x), 22 KB and 60 KB | `Brand_Attempts/2026-10-05_brand_chi-rho_C2_circuit-reliquary_polish.png` (2048×2048, the final mark). Cropped to the window (1940×1940 at +54+64), the black corners made transparent with a circular mask (radius 967, blurred 2px), resized and saved as WebP with alpha (quality 86). Used large in About. |
-| `chirho-code-flat-small-16.png`, `chirho-code-flat-small-32.png` | 16 and 32 px | `Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat-small_{16,32}.png`. The flat small-size mark (an emboldened glyph, no rim): the 16 and 32 favicons. |
-| `chirho-code-flat-48.png`, `chirho-code-flat-64.png` | 48 and 64 px | `Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat_{48,64}.png`. The 48 and 64 favicons, and the header icon (48, 40 px shown). |
-| `chirho-code-flat-180.png` | 180 px | `Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat_180.png`. The Apple touch icon, and the header icon's 2x. |
-| `favicon.ico` | 16, 32, 48, 64 | `Brand_Attempts/favicon/2026-10-09_c2/favicon.ico` (16 and 32 from the flat-small mark, 48 and 64 from the flat mark). |
+| `chirho-code-mark-240.webp`, `chirho-code-mark-480.webp` | 240 and 480 px (1x/2x), 22 KB and 60 KB | ImageMagick 7: cropped to the window (1940×1940 at +54+64), the black corners made transparent with a circular mask (radius 967, blurred 2px), resized and saved as WebP with alpha (quality 86). Used large in About. |
+| `chirho-code-mark-16.png`, `chirho-code-mark-32.png` | 16 and 32 px | `packaging/generate_icons.py`, the app's 16 and 32 px frames. The 16 and 32 favicons. |
+| `chirho-code-mark-48.png`, `chirho-code-mark-64.png` | 48 and 64 px | `packaging/generate_icons.py`, the app's 48 and 64 px frames. The 48 and 64 favicons, and the header icon (48, 40 px shown). |
+| `chirho-code-mark-180.png` | 180 px | `packaging/generate_icons.py`. The Apple touch icon, and the header icon's 2x. |
+| `favicon.ico` | 16, 32, 48, 64 | `packaging/generate_icons.py`, the same frames as the PNGs. |
 
-The flat set is redrawn from the final mark (C2) by
-`tools/site/build_brand_icons.py`, which writes the whole set and, with
-`--site`, copies these files here (see
-`favicon/2026-10-09_c2/2026-10-09_chi-rho_circuit_flat_c2.json`). It follows
-the method of the earlier set drawn from C
-(`favicon/2026-10-05_chi-rho_circuit_flat.json`). The detailed mark is for
-64px and up; the flat-small one for 16 and 32.
+Don't edit the generated files by hand: rerun `packaging/generate_icons.py`,
+which records them in `packaging/icons.sha256`, and
+`tests/frontend/icons.test.mjs` fails if they drift from that record.
 
 ## Look and stylesheets (design of 2026-10-31)
 
