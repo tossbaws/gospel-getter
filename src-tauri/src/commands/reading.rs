@@ -15,26 +15,25 @@ use crate::start_here::{StartHereDto, start_here};
 // Shared with the page, which reads them whole (see shared/wire.rs).
 pub use crate::wire::{BibleEdgeDto, BookDto, BookStartDto, TranslationDto, XrefDto};
 
-impl From<&Book> for BookDto {
-    fn from(b: &Book) -> Self {
-        Self {
-            id: b.id,
-            name: b.name.clone(),
-            chapter_count: b.chapter_count,
-        }
+// Functions, not `From` impls or `BibleEdgeDto`'s own: the DTOs (`wire`) and
+// `Book` and `Translation` (`db`) are all core's, so the orphan rule keeps
+// the app from implementing anything on them.
+fn book_dto(b: &Book) -> BookDto {
+    BookDto {
+        id: b.id,
+        name: b.name.clone(),
+        chapter_count: b.chapter_count,
     }
 }
 
-impl From<&Translation> for TranslationDto {
-    fn from(t: &Translation) -> Self {
-        let source = db::seed::source(&t.code);
-        Self {
-            code: t.code.clone(),
-            name: t.name.clone(),
-            date: source.and_then(|s| s.date).map(str::to_string),
-            licence: source.map_or("", |s| s.licence).to_string(),
-            credit: source.map_or_else(|| t.name.clone(), |s| s.credit.to_string()),
-        }
+fn translation_dto(t: &Translation) -> TranslationDto {
+    let source = db::seed::source(&t.code);
+    TranslationDto {
+        code: t.code.clone(),
+        name: t.name.clone(),
+        date: source.and_then(|s| s.date).map(str::to_string),
+        licence: source.map_or("", |s| s.licence).to_string(),
+        credit: source.map_or_else(|| t.name.clone(), |s| s.credit.to_string()),
     }
 }
 
@@ -130,32 +129,30 @@ pub struct ChapterSideDto {
     pub verses: Vec<SimpleVerseDto>,
 }
 
-impl BibleEdgeDto {
-    /// Before the first chapter of `book`: its testament, and the book with
-    /// its chapter count.
-    fn start(book: &Book) -> Self {
-        let testament = if book.testament == "NT" {
-            "The New Testament"
-        } else {
-            "The Old Testament"
-        };
-        let chapters = if book.chapter_count == 1 {
-            "chapter"
-        } else {
-            "chapters"
-        };
-        Self {
-            title: testament.to_owned(),
-            detail: Some(format!("{} · {} {chapters}", book.name, book.chapter_count)),
-        }
+/// Before the first chapter of `book`: its testament, and the book with
+/// its chapter count.
+fn edge_start(book: &Book) -> BibleEdgeDto {
+    let testament = if book.testament == "NT" {
+        "The New Testament"
+    } else {
+        "The Old Testament"
+    };
+    let chapters = if book.chapter_count == 1 {
+        "chapter"
+    } else {
+        "chapters"
+    };
+    BibleEdgeDto {
+        title: testament.to_owned(),
+        detail: Some(format!("{} · {} {chapters}", book.name, book.chapter_count)),
     }
+}
 
-    /// After the last chapter.
-    fn end() -> Self {
-        Self {
-            title: "The end of the Bible".to_owned(),
-            detail: None,
-        }
+/// After the last chapter.
+fn edge_end() -> BibleEdgeDto {
+    BibleEdgeDto {
+        title: "The end of the Bible".to_owned(),
+        detail: None,
     }
 }
 
@@ -267,8 +264,8 @@ async fn build_reading_pane_dto(
     };
     let prev_book = bible::previous_book(&state.books, current).map(book_start);
     let next_book = bible::next_book(&state.books, current).map(book_start);
-    let prev_edge = prev.is_none().then(|| BibleEdgeDto::start(current_book));
-    let next_edge = next.is_none().then(BibleEdgeDto::end);
+    let prev_edge = prev.is_none().then(|| edge_start(current_book));
+    let next_edge = next.is_none().then(edge_end);
 
     let cross_refs = state
         .store
@@ -345,19 +342,15 @@ pub async fn home(state: &AppState) -> HomeDto {
         .books
         .iter()
         .filter(|b| b.testament == "OT")
-        .map(BookDto::from)
+        .map(book_dto)
         .collect();
     let nt_books = state
         .books
         .iter()
         .filter(|b| b.testament == "NT")
-        .map(BookDto::from)
+        .map(book_dto)
         .collect();
-    let translations = state
-        .translations
-        .iter()
-        .map(TranslationDto::from)
-        .collect();
+    let translations = state.translations.iter().map(translation_dto).collect();
 
     let default_translation_id = resolve_translation(state, None);
     let ((translation_id, book_id, chapter, at), has_saved_position) =
@@ -731,10 +724,10 @@ mod tests {
         // count, as stored; one chapter is singular.
         let obadiah = state.books.iter().find(|b| b.name == "Obadiah").unwrap();
         assert_eq!(
-            BibleEdgeDto::start(obadiah).detail.as_deref(),
+            edge_start(obadiah).detail.as_deref(),
             Some("Obadiah · 1 chapter")
         );
         let matthew = state.books.iter().find(|b| b.name == "Matthew").unwrap();
-        assert_eq!(BibleEdgeDto::start(matthew).title, "The New Testament");
+        assert_eq!(edge_start(matthew).title, "The New Testament");
     }
 }

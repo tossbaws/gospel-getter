@@ -5,33 +5,23 @@
 pub mod commands;
 pub mod credit_links;
 pub mod log_file;
-pub mod markdown;
-pub mod notes_export;
-pub mod passage_copy;
-// The saved settings' one table, shared with the page's Rust pieces
-// (ui-leptos), which compile the same file.
-#[path = "../../shared/preferences.rs"]
-pub mod preferences;
-pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
 #[cfg(test)]
 mod reader_data_validate_tests;
-pub mod release_notes;
 pub mod retry;
-pub mod start_here;
 pub mod support_link;
 pub mod updater;
 pub mod web_link;
 pub mod window;
-// The commands' answers the page reads whole, shared with the page's Rust
-// pieces (ui-leptos), which compile the same file.
-#[path = "../../shared/wire.rs"]
-pub mod wire;
 
-// The database and the domain logic, in a crate of their own, free of Tauri,
-// so that `gospel-getter-cli` can use them without linking the webview.
-pub use gospel_getter_core::{book_aliases, db, domain, passage_reference, verse_parts};
+// Everything that doesn't need Tauri, in a crate of its own, so that
+// `gospel-getter-cli` can use it without linking the webview (see core's
+// lib.rs).
+pub use gospel_getter_core::{
+    book_aliases, db, domain, markdown, notes_export, passage_copy, passage_reference, preferences,
+    reader_data, release_notes, start_here, verse_parts, wire,
+};
 
 use anyhow::Context;
 use tauri::Manager;

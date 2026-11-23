@@ -1,6 +1,6 @@
 //! Reading and writing the reader's own data (bookmarks, highlights, notes
-//! and reading position) for export and import. The file format is the
-//! app crate's `reader_data` module (`src-tauri/src/reader_data.rs`).
+//! and reading position) for export and import. The file format is
+//! [`crate::reader_data`].
 //! Bundled data — verses, books, translations, cross-references, the
 //! search index — is never written here.
 

@@ -101,11 +101,12 @@ const AN_AGENT_IS: &str = "The agent is a short name of at most 40 characters, s
 
 /// The most AI findings Gospel Getter keeps, every request's together, as
 /// [`MAX_NOTES`](super::notes::MAX_NOTES) is for notes: a backup holds them
-/// all, and it bounds a backup's size (`reader_data::MAX_FILE_BYTES` in the
-/// app). Enforced where an agent's save is (`insert_findings`), and only
-/// there: the app's Undo ([`restore_findings`]) and an import put back the
-/// reader's own records, which a cap must never refuse (decision AF1), and
-/// an install from before the cap (2.26.0) may hold more.
+/// all, and it bounds a backup's size
+/// ([`MAX_FILE_BYTES`](crate::reader_data::MAX_FILE_BYTES)). Enforced where
+/// an agent's save is (`insert_findings`), and only there: the app's Undo
+/// ([`restore_findings`]) and an import put back the reader's own records,
+/// which a cap must never refuse (decision AF1), and an install from before
+/// the cap (2.26.0) may hold more.
 pub const MAX_FINDINGS: usize = 10_000;
 
 /// Who a finding is said to be by when its agent gives no name.
