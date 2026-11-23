@@ -1454,6 +1454,88 @@ fn workflow_jobs(workflow: &str) -> Vec<(String, String)> {
     jobs
 }
 
+/// A `permissions:` block at `indent` in `text` (a workflow's own at "", a
+/// job's at four spaces in its [`workflow_jobs`] text), as its trimmed
+/// lines, or the one value of `permissions: write-all` and the like.
+fn permissions_at(text: &str, indent: &str) -> Option<Vec<String>> {
+    let mut lines = text.lines();
+    let first = lines.find(|l| {
+        l.strip_prefix(indent)
+            .is_some_and(|rest| rest.starts_with("permissions:"))
+    })?;
+    let value = first[indent.len() + "permissions:".len()..].trim();
+    if !value.is_empty() {
+        return Some(vec![value.to_owned()]);
+    }
+    let inner = format!("{indent}  ");
+    Some(
+        lines
+            .take_while(|l| l.starts_with(&inner))
+            .map(|l| l.trim().to_owned())
+            .filter(|l| !l.starts_with('#'))
+            .collect(),
+    )
+}
+
+/// Every workflow's token reads only, unless a job needs more (F-08). Each
+/// workflow declares its own top-level `permissions:`, since without one
+/// the token gets the repository's default, which can be write access to
+/// everything. No workflow or job asks for `write-all`, and each grant of
+/// write access is one listed here with what it's for; `contents: write`
+/// is none of them.
+#[test]
+fn every_workflow_declares_its_token_and_writes_only_where_listed() {
+    // (workflow, job, grant); "" is the workflow's own block.
+    const WRITES: [(&str, &str, &str); 5] = [
+        // Deletes a closed pull request's caches and main's superseded ones.
+        ("workflows/cache-cleanup.yml", "", "actions: write"),
+        // Deletes the Distribution run that ci:full superseded.
+        ("workflows/dist.yml", "supersede", "actions: write"),
+        // Starts the deploy on main when a release is published.
+        ("workflows/pages.yml", "from-release", "actions: write"),
+        // GitHub Pages' own deploy (actions/deploy-pages).
+        ("workflows/pages.yml", "deploy", "id-token: write"),
+        ("workflows/pages.yml", "deploy", "pages: write"),
+    ];
+    let mut wrong = Vec::new();
+    let mut writes = Vec::new();
+    for (file, text) in github_files() {
+        if !file.starts_with("workflows/") {
+            continue;
+        }
+        let Some(own) = permissions_at(&text, "") else {
+            wrong.push(format!("{file} declares no top-level permissions:"));
+            continue;
+        };
+        let mut blocks = vec![(String::new(), own)];
+        for (job, body) in workflow_jobs(&text) {
+            if let Some(grants) = permissions_at(&body, "    ") {
+                blocks.push((job, grants));
+            }
+        }
+        for (job, grants) in blocks {
+            for grant in grants {
+                if grant.contains("write-all") {
+                    wrong.push(format!("{file} {job:?}: {grant}"));
+                } else if grant.ends_with(": write") {
+                    writes.push((file.clone(), job.clone(), grant));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+    let mut listed: Vec<(String, String, String)> = WRITES
+        .iter()
+        .map(|(f, j, g)| ((*f).to_owned(), (*j).to_owned(), (*g).to_owned()))
+        .collect();
+    listed.sort();
+    writes.sort();
+    assert_eq!(
+        writes, listed,
+        "a write grant not listed here, or a listed one gone"
+    );
+}
+
 /// Every action a workflow or the repository's own action uses is pinned to
 /// a commit, not a tag or branch that can be moved under it (D-01), with
 /// the release it is in a comment, which Dependabot keeps up to date

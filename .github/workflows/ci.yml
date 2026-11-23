@@ -31,6 +31,10 @@ on:
     branches: [main]
   pull_request:
 
+# Every job only reads (gh release download of the build tools included).
+permissions:
+  contents: read
+
 # A newer push to a pull request cancels that pull request's run in
 # progress: its result no longer counts. Every other run (main's pushes)
 # is a group of its own, its run id, and cancels nothing: one shared group,
