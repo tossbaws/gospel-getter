@@ -746,16 +746,37 @@ verses and its row in `translations`), or the whole database.
 
 ```bash
 # From the repository root; each line runs on its own.
-trunk build --release                          # the page, into dist/ (the backend embeds it)
+trunk build --release                          # the page, into dist/ (the backend embeds it): first
 (cd ui-leptos && cargo test)                   # the page's Rust pieces: their pure logic
-(cd src-tauri && cargo test)                   # backend: database, upgrades, search, references
-(cd tests/frontend && npm ci && npm test)      # frontend behavior (builds the page itself)
+(cd src-tauri && cargo test --all-targets && cargo test --doc)
+                                               # backend: database, upgrades, search, references, the CLI
+(cd tests/frontend && npm ci && npm test)      # frontend behavior in jsdom (builds the page itself)
+python3 -m unittest discover -s tools/release  # the release tools
+python3 -m unittest discover -s tools/ci       # the build tools' pins
+scripts/test-install.sh                        # which AppImage the install script installs
+scripts/gui-check.sh <app or AppImage>         # the GUI checks, on the real app (a release build)
 ```
 
-The frontend tests load the real `ui/index.html` into jsdom and answer its
-calls with the app's real command code and a throwaway database, through a
-test-only bridge (`src-tauri/examples/frontend_bridge.rs`). CI runs both,
-plus `cargo fmt` and Clippy.
+- **Backend and page tests** (`cargo test`) run in CI on every pull
+  request, with `cargo fmt`, Clippy and the docs build (`ci.yml`); the
+  backend's run on Windows too.
+- **Frontend tests** load the real `ui/index.html` into jsdom and answer
+  its calls with the app's real command code and a throwaway database,
+  through a test-only bridge (`src-tauri/examples/frontend_bridge.rs`).
+  CI runs them on every pull request, in two halves.
+- **The tools' tests** (Python) and the install script's run in CI on
+  every pull request.
+- **The GUI checks** (`tests/gui/`, run by `scripts/gui-check.sh`) drive
+  the built app through its own webview with tauri-driver: they start it,
+  click, type and read the page as a reader would. They need a release
+  build of the app. On Linux the app runs on a private Xvfb display, so
+  nothing reaches your desktop; the script says which tool it's missing,
+  if any. CI runs them on the built AppImage in every Distribution
+  run (`dist.yml`), and on the Windows installer for a release and for
+  pull requests labelled `ci:full`.
+
+`CLAUDE.md` lists the exact commands CI runs, and [RELEASING.md](RELEASING.md)
+what a release adds.
 
 ## Data provenance and textual integrity
 
