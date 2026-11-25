@@ -8,6 +8,11 @@
 # yet, each with the reason it doesn't need action now and when to look
 # again. `--deny warnings` makes anything else go red, including new
 # "unmaintained", "unsound" and "yanked" notices.
+#
+# On main, a red run opens an issue labelled `audit` (or comments on the
+# open one) listing each finding, and a green run closes it, so a new
+# advisory stays on the open-issues list until its fix merges (the report
+# job, tools/ci/audit_report.py).
 name: Audit
 
 on:
@@ -28,21 +33,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Stable, not the RUST_TOOLCHAIN that ci.yml and dist.yml build with:
       # this job builds none of the app, only cargo-audit, which reads the
       # lock files, so the latest cargo-audit installs even when it needs a
       # newer Rust than the pin.
       - name: Install Rust
+        id: rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
           toolchain: stable
 
       - name: Install cargo-audit
+        id: install
         run: cargo install cargo-audit --locked
 
+      # Each audit runs twice: readably, for the log and the step's exit
+      # code, then as JSON for the report job, that pass's exit code
+      # ignored. --no-fetch makes the JSON pass read the database the first
+      # pass fetched, so the two can't differ by an advisory published in
+      # between; when the first pass fetched nothing, the JSON pass writes
+      # no report, and the report job says the lock file wasn't audited.
       - name: Audit the app (src-tauri)
+        id: app
         working-directory: src-tauri
         run: |
           ignored=(
@@ -81,11 +96,16 @@ jobs:
           )
           args=()
           for id in "${ignored[@]}"; do args+=(--ignore "$id"); done
-          cargo audit --deny warnings "${args[@]}"
+          status=0
+          cargo audit --deny warnings "${args[@]}" || status=$?
+          mkdir -p "$RUNNER_TEMP/audit-report"
+          cargo audit --deny warnings --no-fetch --json "${args[@]}" >"$RUNNER_TEMP/audit-report/src-tauri.json" || true
+          exit "$status"
 
       # Each lock file is audited even if one before it went red, so a run
       # reports all three.
       - name: Audit the Leptos UI (ui-leptos)
+        id: ui
         if: ${{ !cancelled() }}
         working-directory: ui-leptos
         run: |
@@ -101,9 +121,129 @@ jobs:
           )
           args=()
           for id in "${ignored[@]}"; do args+=(--ignore "$id"); done
-          cargo audit --deny warnings "${args[@]}"
+          status=0
+          cargo audit --deny warnings "${args[@]}" || status=$?
+          mkdir -p "$RUNNER_TEMP/audit-report"
+          cargo audit --deny warnings --no-fetch --json "${args[@]}" >"$RUNNER_TEMP/audit-report/ui-leptos.json" || true
+          exit "$status"
 
       - name: Audit the GUI checks (tests/gui)
+        id: gui
         if: ${{ !cancelled() }}
         working-directory: tests/gui
-        run: cargo audit --deny warnings
+        run: |
+          status=0
+          cargo audit --deny warnings || status=$?
+          mkdir -p "$RUNNER_TEMP/audit-report"
+          cargo audit --deny warnings --no-fetch --json >"$RUNNER_TEMP/audit-report/tests-gui.json" || true
+          exit "$status"
+
+      # What the report job needs to say which step failed when there's
+      # no report to read. The ids are tools/ci/audit_report.py's STEPS;
+      # move both together. Neither this nor the upload may change the
+      # job's result, which is the audit's.
+      - name: Note each step's outcome for the report
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          RUST: ${{ steps.rust.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          APP: ${{ steps.app.outcome }}
+          UI: ${{ steps.ui.outcome }}
+          GUI: ${{ steps.gui.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/audit-report"
+          printf '%s\n' "checkout $CHECKOUT" "rust $RUST" "install $INSTALL" \
+            "app $APP" "ui $UI" "gui $GUI" >"$RUNNER_TEMP/audit-report/outcomes.txt"
+
+      - name: Upload the reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: audit-report
+          path: ${{ runner.temp }}/audit-report/
+          # None is a report too: the report job says the audit couldn't run.
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Tells the `audit` issue what the audit found (see the header). It runs
+  # after a red or cancelled audit too, and only on main: a run on another
+  # branch is someone trying a change, not news about main.
+  report:
+    needs: cargo-audit
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A broken report mustn't turn a green audit's run red (the releases
+    # check the run is green); a red audit's run stays red by its own job.
+    continue-on-error: true
+    # To open, comment on and close the issue, and create its label, and to
+    # check out tools/ci: once a job names any permission, every one it
+    # doesn't name is none.
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      # Missing when the audit job failed or was cancelled before its
+      # upload: the script reads that as no report.
+      - name: Download the reports
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: audit-report
+          path: ${{ runner.temp }}/audit-report
+
+      # Advisory text is untrusted: it reaches GitHub only in the files the
+      # script writes (title.txt, body.md), never in this script's source.
+      - name: Open, comment on or close the audit issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.cargo-audit.result }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          reports="$RUNNER_TEMP/audit-report"
+          out="$RUNNER_TEMP/audit-issue"
+          mkdir -p "$reports"
+          decision="$(python3 tools/ci/audit_report.py --ref "$GITHUB_REF" --result "$RESULT" \
+            --commit "$GITHUB_SHA" --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --reports "$reports" --out "$out")"
+          echo "The audit job's result: $RESULT. Decision: $decision."
+          if [ "$decision" = nothing ]; then
+            exit 0
+          fi
+          gh label create audit --color B60205 \
+            --description "An advisory the audit (audit.yml) found on main" --force
+          open="$(gh issue list --label audit --state open --limit 1 --json number --jq '.[0].number // empty')"
+          case "$decision" in
+            open-or-comment)
+              if [ -n "$open" ]; then
+                gh issue comment "$open" --body-file "$out/body.md"
+                echo "Commented on the open audit issue #$open."
+              else
+                title="$(cat "$out/title.txt")"
+                gh issue create --label audit --title "$title" --body-file "$out/body.md"
+              fi
+              ;;
+            close)
+              if [ -n "$open" ]; then
+                gh issue comment "$open" --body-file "$out/body.md"
+                gh issue close "$open" --reason completed
+                echo "Closed the audit issue #$open."
+              else
+                echo "The audit is green and no audit issue is open: nothing to do."
+              fi
+              ;;
+            *)
+              echo "::error::unknown decision: $decision"
+              exit 1
+              ;;
+          esac
