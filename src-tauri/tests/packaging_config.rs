@@ -1713,7 +1713,9 @@ fn has_empty_and_branch(expression: &str) -> bool {
 #[test]
 fn every_workflow_declares_its_token_and_writes_only_where_listed() {
     // (workflow, job, grant); "" is the workflow's own block.
-    const WRITES: [(&str, &str, &str); 5] = [
+    const WRITES: [(&str, &str, &str); 6] = [
+        // Opens, comments on and closes the issue a red audit on main files.
+        ("workflows/audit.yml", "report", "issues: write"),
         // Deletes a closed pull request's caches and main's superseded ones.
         ("workflows/cache-cleanup.yml", "", "actions: write"),
         // Deletes the Distribution run that ci:full superseded.

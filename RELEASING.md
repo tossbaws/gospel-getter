@@ -115,6 +115,8 @@ checks on Linux and Windows and the rehearsal.
    the installers (release)** and **Assemble the release files**); the
    rehearsal and supersede jobs are skipped on a dispatch, as expected. The
    audit must be green on the same commit; its run is named in the notes.
+   A red release audit also opens (or comments on) the issue labelled
+   `audit`, as the weekly one does.
 
 Take the release's files only from that run's `gospel-getter-release-bundle`
 artifact, never from a pull request's run or a failed attempt. If `main`
