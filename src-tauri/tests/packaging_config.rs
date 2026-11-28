@@ -2944,6 +2944,38 @@ fn ci_cancels_only_a_pull_requests_superseded_run() {
     );
 }
 
+/// Two Audit runs on main (the Monday cron and a dispatch) each look up the
+/// open `audit` issue and then write to it, so at once they could open two,
+/// or one could close it while the other comments. The report job is one
+/// fixed concurrency group that never cancels the job in progress, so they
+/// take turns. The audit job and the workflow have no group: a release's
+/// dispatched audit (RELEASING.md) never waits behind another run's.
+#[test]
+fn audit_runs_update_the_issue_one_at_a_time() {
+    let audit = workflow("audit.yml");
+    let report = &audit.job("report").yaml["concurrency"];
+    assert_eq!(
+        scalar(&report["group"]).as_deref(),
+        Some("audit-issue"),
+        "the report job's concurrency group, the same for every run: {}",
+        flow(report)
+    );
+    assert_eq!(
+        scalar(&report["cancel-in-progress"]).as_deref(),
+        Some("false"),
+        "a run's issue update is never cancelled: {}",
+        flow(report)
+    );
+    assert!(
+        !audit.job("cargo-audit").has("concurrency"),
+        "the audit itself runs whenever it's started"
+    );
+    assert!(
+        audit.yaml["concurrency"].is_badvalue(),
+        "a workflow-wide group would queue the audit too"
+    );
+}
+
 /// Each platform's upgrade check (tools/ci/upgrade_check.py, whose header
 /// says why) runs whenever that platform's GUI checks run, on the
 /// installer that platform's build job made, and the release's sign job

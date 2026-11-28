@@ -176,6 +176,11 @@ jobs:
     if: ${{ always() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Two runs' look-up-then-write could open two issues, or close one while
+    # the other comments on it; one fixed group makes them take turns.
+    concurrency:
+      group: audit-issue
+      cancel-in-progress: false
     # A broken report mustn't turn a green audit's run red (the releases
     # check the run is green); a red audit's run stays red by its own job.
     continue-on-error: true
