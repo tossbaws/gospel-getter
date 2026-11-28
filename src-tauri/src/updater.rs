@@ -34,10 +34,12 @@
 //! (`migrate::older_app_can_use`); otherwise About says why. Going back
 //! saves a whole backup beside the database first
 //! (`save_backup_before_going_back`), and installs nothing until one is
-//! saved for that version (`install_previous_version`).
+//! saved for that version (`install_previous_version`). Both steps name
+//! the version the reader confirmed, and refuse if it isn't the one
+//! offered.
 
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -206,6 +208,7 @@ pub mod messages {
     pub const BACKUP_FAILED: &str = "Your notes, bookmarks, highlights and settings couldn\u{2019}t be backed up, so Gospel Getter didn\u{2019}t go back. Nothing was changed.";
     pub const NOT_BACKED_UP: &str =
         "Gospel Getter goes back only once it has saved a backup. Nothing was changed.";
+    pub const GO_BACK_CHANGED: &str = "The version to go back to has changed. Check for updates, then try again. Nothing was changed.";
 }
 
 /// How long a check for updates may take: one that hasn't answered by then
@@ -299,7 +302,10 @@ pub fn with_causes(error: &dyn std::error::Error) -> String {
 #[derive(Default)]
 pub struct PendingUpdate {
     update: Mutex<Option<Update>>,
-    previous: Mutex<Option<Previous>>,
+    go_back: Mutex<GoBack>,
+    /// The last ticket a check for Go back's release took
+    /// ([`PendingUpdate::previous_ticket`]).
+    go_back_tickets: AtomicU64,
     /// Set by the Windows hook ([`installer_hook`]) right before the
     /// installer is started: an install that returns once it's set
     /// didn't start the installer.
@@ -315,41 +321,87 @@ struct Previous {
     backed_up: bool,
 }
 
-impl PendingUpdate {
-    fn offer_previous(&self, previous: Option<Previous>) {
-        *self.previous.lock().unwrap_or_else(|e| e.into_inner()) = previous;
-    }
+/// The release Go back offers, and the ticket of the check whose answer
+/// it is.
+#[derive(Default)]
+struct GoBack {
+    previous: Option<Previous>,
+    answered: u64,
+}
 
-    fn previous_version(&self) -> Option<String> {
-        self.previous
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .map(|p| p.version.clone())
-    }
-
-    /// A backup was saved before going back to `version`, if it's still
-    /// the one offered.
-    fn backed_up_for(&self, version: &str) {
-        if let Some(previous) = self
+impl GoBack {
+    /// The release offered, if it's `version`, the one the reader
+    /// confirmed: the page's version only names the offer, and never
+    /// chooses what's downloaded.
+    fn offered(&mut self, version: &str) -> Result<&mut Previous, &'static str> {
+        let previous = self
             .previous
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
             .as_mut()
-            .filter(|p| p.version == version)
-        {
-            previous.backed_up = true;
+            .ok_or(messages::NOTHING_TO_GO_BACK_TO)?;
+        if previous.version != version {
+            return Err(messages::GO_BACK_CHANGED);
+        }
+        Ok(previous)
+    }
+}
+
+impl PendingUpdate {
+    fn go_back(&self) -> std::sync::MutexGuard<'_, GoBack> {
+        self.go_back.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A ticket for a check for Go back's release, taken as it starts: its
+    /// answer is for [`PendingUpdate::offer_previous`].
+    fn previous_ticket(&self) -> u64 {
+        self.go_back_tickets.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// What the check that took `ticket` found. Checks overlap (the
+    /// launch's and Check now's, or two Check nows), and one started
+    /// earlier can answer last: its answer is dropped once a later one's
+    /// has been taken, or Go back could lose its backup, or name a release
+    /// the reader didn't confirm, between its two steps. The release
+    /// already offered, offered again, keeps its backup.
+    fn offer_previous(&self, ticket: u64, previous: Option<Previous>) {
+        let mut go_back = self.go_back();
+        if go_back.answered > ticket {
+            tracing::debug!(
+                "A check for Go back's release answered after a later one; its answer is dropped"
+            );
+            return;
+        }
+        go_back.answered = ticket;
+        match (go_back.previous.as_mut(), previous) {
+            (Some(offered), Some(again)) if offered.version == again.version => {
+                if let Some(update) = again.update.filter(|u| u.version == offered.version) {
+                    offered.update = Some(update);
+                }
+            }
+            (_, previous) => go_back.previous = previous,
         }
     }
 
-    /// The release to go back to, once a backup was saved for it.
-    fn previous_to_install(&self) -> Result<(String, Option<Update>), &'static str> {
-        let previous = self.previous.lock().unwrap_or_else(|e| e.into_inner());
-        let previous = previous.as_ref().ok_or(messages::NOTHING_TO_GO_BACK_TO)?;
+    /// Go back may save its backup for `version`: it's the release offered.
+    fn may_back_up_for(&self, version: &str) -> Result<(), &'static str> {
+        self.go_back().offered(version).map(|_| ())
+    }
+
+    /// A backup was saved before going back to `version`: refused, and
+    /// nothing marked, if it isn't the release offered (any more).
+    fn backed_up_for(&self, version: &str) -> Result<(), &'static str> {
+        self.go_back().offered(version)?.backed_up = true;
+        Ok(())
+    }
+
+    /// The release to go back to, `version`, once a backup was saved for
+    /// it; refused if it isn't the release offered.
+    fn previous_to_install(&self, version: &str) -> Result<Option<Update>, &'static str> {
+        let mut go_back = self.go_back();
+        let previous = go_back.offered(version)?;
         if !previous.backed_up {
             return Err(messages::NOT_BACKED_UP);
         }
-        Ok((previous.version.clone(), previous.update.clone()))
+        Ok(previous.update.clone())
     }
 }
 
@@ -728,6 +780,7 @@ pub async fn check_previous_version<R: Runtime>(
     state: State<'_, AppState>,
     pending: State<'_, PendingUpdate>,
 ) -> Result<Option<PreviousInfo>, String> {
+    let ticket = pending.previous_ticket();
     if let Some(script) = state.bridge_script() {
         let found = script
             .check_previous()
@@ -737,6 +790,7 @@ pub async fn check_previous_version<R: Runtime>(
             None => None,
         };
         pending.offer_previous(
+            ticket,
             info.as_ref()
                 .filter(|i| i.reads_this_data)
                 .map(|i| Previous {
@@ -751,7 +805,7 @@ pub async fn check_previous_version<R: Runtime>(
         return Ok(None);
     };
     if settings.mode != UpdateMode::SelfUpdate {
-        pending.offer_previous(None);
+        pending.offer_previous(ticket, None);
         return Ok(None);
     }
     let found = within_check_time(settings.timeout, async {
@@ -771,12 +825,12 @@ pub async fn check_previous_version<R: Runtime>(
         Ok(Some(update)) => update,
         Ok(None) => {
             tracing::warn!("This release's previous.json names no lower, final release");
-            pending.offer_previous(None);
+            pending.offer_previous(ticket, None);
             return Ok(None);
         }
         Err(e) => {
             tracing::info!("No earlier release to go back to: {e}");
-            pending.offer_previous(None);
+            pending.offer_previous(ticket, None);
             return Ok(None);
         }
     };
@@ -786,6 +840,7 @@ pub async fn check_previous_version<R: Runtime>(
         .and_then(serde_json::Value::as_i64);
     let info = previous_info(&state, &update.version, schema).await;
     pending.offer_previous(
+        ticket,
         info.as_ref()
             .filter(|i| i.reads_this_data)
             .map(|i| Previous {
@@ -841,15 +896,19 @@ async fn previous_info(
 /// beside the database, under a name that says what it's for, never over
 /// a file already there (`commands::save_backup_before`). Going back
 /// installs nothing until this has succeeded for the release offered.
+/// `version` is the one the reader confirmed: if another is offered by
+/// now, nothing is saved.
 #[tauri::command]
 pub async fn save_backup_before_going_back(
     state: State<'_, AppState>,
     pending: State<'_, PendingUpdate>,
     preferences: crate::reader_data::Preferences,
+    version: String,
 ) -> Result<BackupSaved, String> {
-    let version = pending
-        .previous_version()
-        .ok_or_else(|| messages::NOTHING_TO_GO_BACK_TO.to_string())?;
+    pending.may_back_up_for(&version).map_err(|refused| {
+        tracing::warn!("Go back to {version} refused before its backup: {refused}");
+        refused.to_string()
+    })?;
     let folder = match state.bridge_script().and_then(|s| s.backup_folder()) {
         Some(folder) => Ok(folder),
         None => state.store.database_file().await.and_then(|file| {
@@ -872,7 +931,12 @@ pub async fn save_backup_before_going_back(
         "Backed up before going back to {version}: {}",
         path.display()
     );
-    pending.backed_up_for(&version);
+    // The offer can change while the backup is saved: this one is then for
+    // a release that isn't offered, and Go back stops here.
+    pending.backed_up_for(&version).map_err(|refused| {
+        tracing::warn!("Go back to {version} refused after its backup: {refused}");
+        refused.to_string()
+    })?;
     Ok(BackupSaved {
         path: path.display().to_string(),
     })
@@ -880,16 +944,22 @@ pub async fn save_backup_before_going_back(
 
 /// Go back: download the release `previous.json` named, verify it with
 /// this app's key and its version, install it and restart, exactly as
-/// Update now does, with the same progress. Only once a backup was saved
-/// for it (`save_backup_before_going_back`); it only returns on failure.
+/// Update now does, with the same progress. Only `version`, the one the
+/// reader confirmed, and only if it's still the release offered and a
+/// backup was saved for it (`save_backup_before_going_back`); it only
+/// returns on failure.
 #[tauri::command]
 pub async fn install_previous_version<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     pending: State<'_, PendingUpdate>,
     on_event: Channel<DownloadEvent>,
+    version: String,
 ) -> Result<(), String> {
-    let (version, update) = pending.previous_to_install().map_err(str::to_string)?;
+    let update = pending.previous_to_install(&version).map_err(|refused| {
+        tracing::warn!("Go back to {version} refused: {refused}");
+        refused.to_string()
+    })?;
     if let Some(script) = state.bridge_script() {
         return scripted_install(script, &on_event).await;
     }
@@ -1092,6 +1162,15 @@ mod tests {
         assert!(!previous_manifest("2.36.0").contains("/latest/"));
     }
 
+    /// The release Go back offers, as a check's answer gives it.
+    fn previous(version: &str) -> Option<Previous> {
+        Some(Previous {
+            version: version.into(),
+            update: None,
+            backed_up: false,
+        })
+    }
+
     /// Go back installs nothing until a backup was saved for the very
     /// release offered: none offered, one offered but not backed up, a
     /// backup for another version, then one for it.
@@ -1099,40 +1178,110 @@ mod tests {
     fn go_back_installs_only_once_backed_up() {
         let pending = PendingUpdate::default();
         assert_eq!(
-            pending.previous_to_install().err(),
+            pending.previous_to_install("2.35.0").err(),
             Some(messages::NOTHING_TO_GO_BACK_TO)
         );
-        pending.offer_previous(Some(Previous {
-            version: "2.35.0".into(),
-            update: None,
-            backed_up: false,
-        }));
+        pending.offer_previous(pending.previous_ticket(), previous("2.35.0"));
         assert_eq!(
-            pending.previous_to_install().err(),
+            pending.previous_to_install("2.35.0").err(),
             Some(messages::NOT_BACKED_UP)
         );
-        pending.backed_up_for("2.34.0");
         assert_eq!(
-            pending.previous_to_install().err(),
+            pending.backed_up_for("2.34.0"),
+            Err(messages::GO_BACK_CHANGED)
+        );
+        assert_eq!(
+            pending.previous_to_install("2.35.0").err(),
             Some(messages::NOT_BACKED_UP)
         );
-        pending.backed_up_for("2.35.0");
+        assert_eq!(pending.backed_up_for("2.35.0"), Ok(()));
+        assert!(pending.previous_to_install("2.35.0").is_ok());
+        pending.offer_previous(pending.previous_ticket(), None);
         assert_eq!(
-            pending.previous_to_install().map(|(version, _)| version),
-            Ok("2.35.0".to_string())
+            pending.previous_to_install("2.35.0").err(),
+            Some(messages::NOTHING_TO_GO_BACK_TO)
         );
-        // A new check offers it afresh: backed up again before it installs.
-        pending.offer_previous(Some(Previous {
-            version: "2.35.0".into(),
-            update: None,
-            backed_up: false,
-        }));
+    }
+
+    /// Checks overlap: one started first and answering last, with a release
+    /// or with none, doesn't replace a later one's answer; the next check's
+    /// answer stands again.
+    #[test]
+    fn a_check_answering_after_a_later_one_is_dropped() {
+        for late in [previous("2.34.0"), previous("2.35.0"), None] {
+            let pending = PendingUpdate::default();
+            let first = pending.previous_ticket();
+            let second = pending.previous_ticket();
+            pending.offer_previous(second, previous("2.35.0"));
+            assert_eq!(pending.backed_up_for("2.35.0"), Ok(()));
+            pending.offer_previous(first, late);
+            assert!(pending.may_back_up_for("2.35.0").is_ok());
+            assert!(pending.previous_to_install("2.35.0").is_ok());
+
+            pending.offer_previous(pending.previous_ticket(), previous("2.34.0"));
+            assert_eq!(
+                pending.previous_to_install("2.35.0").err(),
+                Some(messages::GO_BACK_CHANGED)
+            );
+        }
+    }
+
+    /// The release already offered, offered again by a later check, keeps
+    /// the backup saved for it; another release, or none, is offered
+    /// afresh.
+    #[test]
+    fn offering_the_same_release_again_keeps_its_backup() {
+        let pending = PendingUpdate::default();
+        pending.offer_previous(pending.previous_ticket(), previous("2.35.0"));
+        assert_eq!(pending.backed_up_for("2.35.0"), Ok(()));
+        pending.offer_previous(pending.previous_ticket(), previous("2.35.0"));
+        assert!(pending.previous_to_install("2.35.0").is_ok());
+
+        pending.offer_previous(pending.previous_ticket(), previous("2.34.0"));
         assert_eq!(
-            pending.previous_to_install().err(),
+            pending.previous_to_install("2.34.0").err(),
             Some(messages::NOT_BACKED_UP)
         );
-        pending.offer_previous(None);
-        assert_eq!(pending.previous_version(), None);
+        pending.offer_previous(pending.previous_ticket(), previous("2.35.0"));
+        assert_eq!(
+            pending.previous_to_install("2.35.0").err(),
+            Some(messages::NOT_BACKED_UP),
+            "a release offered afresh is backed up afresh"
+        );
+        assert_eq!(pending.backed_up_for("2.35.0"), Ok(()));
+        pending.offer_previous(pending.previous_ticket(), None);
+        pending.offer_previous(pending.previous_ticket(), previous("2.35.0"));
+        assert_eq!(
+            pending.previous_to_install("2.35.0").err(),
+            Some(messages::NOT_BACKED_UP)
+        );
+    }
+
+    /// The version the reader confirmed, if it isn't the one offered, is
+    /// refused at both steps, and marks nothing: the release offered still
+    /// has no backup.
+    #[test]
+    fn a_version_not_offered_is_refused_and_marks_nothing() {
+        let pending = PendingUpdate::default();
+        pending.offer_previous(pending.previous_ticket(), previous("2.35.0"));
+        assert_eq!(
+            pending.may_back_up_for("2.34.0"),
+            Err(messages::GO_BACK_CHANGED)
+        );
+        assert_eq!(
+            pending.backed_up_for("2.34.0"),
+            Err(messages::GO_BACK_CHANGED)
+        );
+        assert_eq!(
+            pending.previous_to_install("2.34.0").err(),
+            Some(messages::GO_BACK_CHANGED)
+        );
+        assert_eq!(
+            pending.previous_to_install("2.35.0").err(),
+            Some(messages::NOT_BACKED_UP),
+            "nothing marked"
+        );
+        assert!(pending.may_back_up_for("2.35.0").is_ok());
     }
 
     /// Go back's backup: the whole of the reader's data in the Export

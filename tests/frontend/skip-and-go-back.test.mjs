@@ -5,6 +5,8 @@
 // release, a build that installs itself, a release that can use this
 // database), its confirm dialog, the backup saved beside the database
 // before anything is installed, and a failed backup installing nothing.
+// Both of Go back's steps name the version its dialog named, which the
+// backend refuses if it offers another by then.
 // previous.json, the install and the backup's folder are scripted in the
 // test bridge (`setUpdate`); the rules and the backup are the app's.
 
@@ -13,7 +15,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, clickAndWaitForCalls as click, closeBridge, el as $, withApp } from './harness.mjs';
+import { backend, clickAndWaitForCalls as click, closeBridge, el as $, setUpdate, withApp } from './harness.mjs';
 
 const kept = [];
 after(async () => {
@@ -30,6 +32,7 @@ const SKIPPED_KEY = 'gospel-getter-update-skipped';
 const SKIPPED_NOTE = 'You skipped this version, so it isn’t offered when Gospel Getter starts.';
 const BACKUP_FAILED = 'Your notes, bookmarks, highlights and settings couldn’t be backed up, so Gospel Getter didn’t go back. Nothing was changed.';
 const NOT_VERIFIED = 'The update couldn’t be verified as a genuine Gospel Getter release, so it wasn’t installed.';
+const GO_BACK_CHANGED = 'The version to go back to has changed. Check for updates, then try again. Nothing was changed.';
 
 const UPDATE = { version: '99.1.0', notes: 'Newer.', date: '2026-12-01', canSelfUpdate: true };
 // The schema this build makes: an earlier release built for it can use
@@ -213,6 +216,8 @@ test('Go back: the backup is saved beside the database first, this version skipp
         assert.deepEqual(made, ['save_backup_before_going_back', 'install_previous_version'], 'the backup first');
         const [backup] = calls(app, 'save_backup_before_going_back');
         assert.ok(backup.args.preferences && typeof backup.args.preferences === 'object', 'with the display settings');
+        assert.equal(backup.args.version, '1.0.0', 'the backup names the version confirmed');
+        assert.equal(calls(app, 'install_previous_version')[0].args.version, '1.0.0', 'and so does the install');
 
         const saved = $(app, 'go-back-saved').textContent;
         assert.match(saved, /^Backup saved: /);
@@ -290,4 +295,54 @@ test('a backup that can’t be saved stops Go back there: nothing is installed o
         assert.equal($(app, 'go-back-status').textContent, '');
         assert.ok(!$(app, 'go-back-status').classList.contains('is-error'));
         assert.equal($(app, 'go-back-btn').hidden, false);
+    }));
+
+test('Check now stays disabled until Go back’s release is in too', () =>
+    withApp({ update: { previous: PREVIOUS }, storage: { 'gospel-getter-update-check': 'off' } }, async (app) => {
+        app.open('about');
+        const button = $(app, 'update-check-btn');
+        const release = app.holdCommand('check_previous_version');
+        app.click(button);
+        assert.equal(button.disabled, true);
+        await app.until(() => calls(app, 'check_previous_version').length === 1, 'check_previous_version');
+        const [update] = calls(app, 'check_for_update');
+        await app.until(() => update.done, 'check_for_update');
+        await new Promise((r) => setTimeout(r, 20));
+        assert.equal(button.disabled, true, 'the update’s answer alone doesn’t end the check');
+        release();
+        await app.until(() => calls(app, 'check_previous_version')[0].done, 'check_previous_version answered');
+        await app.idle(0);
+        assert.equal(button.disabled, false, 'Check now can be pressed again');
+        assert.equal($(app, 'go-back-btn').hidden, false);
+    }));
+
+test('a check offering another release while Go back’s dialog is open: Go back refuses, and nothing is saved or installed', () =>
+    withApp({ update: { previous: PREVIOUS, install: { events: [], problem: 'notVerified' } } }, async (app) => {
+        app.open('about');
+        const release = app.holdCommand('check_previous_version');
+        app.click($(app, 'update-check-btn'));
+        await app.until(() => calls(app, 'check_previous_version').length === 2, 'Check now’s check_previous_version');
+        app.click($(app, 'go-back-btn'));
+        assert.equal($(app, 'go-back-title').textContent, 'Go back to 1.0.0?');
+
+        // Meanwhile, Check now's check finds another release.
+        await setUpdate({ previous: { version: '1.1.0', schemaVersion: 2 }, install: { events: [], problem: 'notVerified' } });
+        release();
+        await app.until(() => calls(app, 'check_previous_version')[1].done, 'check_previous_version answered');
+        await app.idle(0);
+        assert.equal($(app, 'go-back-overlay').hidden, false, 'the dialog still names 1.0.0');
+
+        const before = app.calls.length;
+        app.click($(app, 'go-back-confirm'));
+        await app.idle(before, 'save_backup_before_going_back');
+        const [backup] = calls(app, 'save_backup_before_going_back');
+        assert.equal(backup.args.version, '1.0.0', 'the version the dialog named');
+        assert.equal(calls(app, 'install_previous_version').length, 0, 'nothing installed');
+        assert.equal($(app, 'go-back-status').textContent, GO_BACK_CHANGED);
+        assert.ok($(app, 'go-back-status').classList.contains('is-error'));
+        assert.equal($(app, 'go-back-saved').hidden, true, 'no backup saved');
+        assert.equal(app.storage()[SKIPPED_KEY], undefined, 'nothing skipped');
+        assert.equal($(app, 'go-back-btn').hidden, false);
+        assert.equal($(app, 'go-back-btn').textContent, 'Go back to 1.1.0', 'what’s offered now');
+        assert.equal($(app, 'update-check-btn').disabled, false);
     }));

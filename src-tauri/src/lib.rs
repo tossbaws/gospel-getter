@@ -840,19 +840,32 @@ mod ipc_tests {
         assert_eq!(result["position"]["reference"], "Psalms 23 (WEB)");
     }
 
-    /// What a [`TestScript`] was asked, and the answer its file dialogs give.
+    /// What a [`TestScript`] was asked, and the answers its file dialogs
+    /// and `previous.json` give.
     #[derive(Default)]
     struct Asked {
         chosen: Option<PathBuf>,
         opened: Vec<String>,
         restarted: bool,
+        previous: Option<ScriptedPrevious>,
+        held: Option<HeldPrevious>,
+    }
+
+    /// The next check for Go back's release, held: it says it has started
+    /// on `started`, waits for `release`, then answers `answer`, whatever
+    /// `Asked::previous` says by then.
+    struct HeldPrevious {
+        answer: Option<ScriptedPrevious>,
+        started: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
     }
 
     /// A [`BridgeScript`] like the frontend tests' bridge's: its file dialogs
     /// answer `Asked::chosen`, its clock is 2026-02-28 20:00 UTC in UTC+10
     /// (Mar 1 there), its browser only notes what it's asked to open, a
-    /// check finds 9.9.9, and an install sends two events, then fails as
-    /// not verified.
+    /// check finds 9.9.9, `previous.json` names `Asked::previous` (or the
+    /// held answer, `Asked::held`), and an install sends two events, then
+    /// fails as not verified.
     struct TestScript(Arc<Mutex<Asked>>);
 
     impl TestScript {
@@ -900,7 +913,16 @@ mod ipc_tests {
         }
 
         fn check_previous(&self) -> Option<ScriptedPrevious> {
-            None
+            let held = {
+                let mut asked = self.asked();
+                match asked.held.take() {
+                    Some(held) => held,
+                    None => return asked.previous.clone(),
+                }
+            };
+            let _ = held.started.send(());
+            let _ = held.release.recv();
+            held.answer
         }
 
         fn backup_folder(&self) -> Option<PathBuf> {
@@ -1071,6 +1093,120 @@ mod ipc_tests {
                 (7, json!({ "event": "finished" })),
             ]
         );
+        assert!(!asked.lock().expect("asked").restarted);
+    }
+
+    /// Go back installs the version the reader confirmed, through the same
+    /// IPC the page uses. A check for Go back's release that started first
+    /// and answers after the backup (with the same release, or with nothing,
+    /// as offline) doesn't undo it: the install still goes ahead. Neither
+    /// does a later check offering that release again. A different release,
+    /// offered while the confirm dialog is open, is refused at both steps,
+    /// and nothing is saved or installed.
+    #[test]
+    fn go_back_installs_the_version_the_reader_confirmed() {
+        use crate::updater::messages::{GO_BACK_CHANGED, NOT_BACKED_UP, NOT_VERIFIED};
+
+        let (db, state, schema) = tauri::async_runtime::block_on(async {
+            let (db, pool) = fresh_database("ipc_go_back").await;
+            let state = AppState::load(pool).await.expect("load state");
+            let schema = state.store.schema_version().await.expect("schema");
+            (db, state, schema)
+        });
+        let asked = Arc::new(Mutex::new(Asked::default()));
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let (_app, webview) = scripted_app(state, TestScript(asked.clone()), heard.clone());
+        let named = |version: &str| ScriptedPrevious {
+            version: version.into(),
+            schema_version: schema,
+        };
+        let names = |previous: Option<ScriptedPrevious>| {
+            asked.lock().expect("asked").previous = previous;
+        };
+        let check = || {
+            invoke(&webview, "check_previous_version", json!({})).expect("checked")["version"]
+                .clone()
+        };
+        let backups = || {
+            std::fs::read_dir(db.path().parent().expect("its folder"))
+                .expect("the database's folder")
+                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+                .filter(|name| name.starts_with("gospel-getter-backup-before-"))
+                .count()
+        };
+        let back_up = |version: &str| {
+            invoke(
+                &webview,
+                "save_backup_before_going_back",
+                json!({ "preferences": {}, "version": version }),
+            )
+        };
+        let channel = std::sync::atomic::AtomicU32::new(10);
+        let install = |version: &str| {
+            let id = channel.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let answer = invoke(
+                &webview,
+                "install_previous_version",
+                json!({ "onEvent": format!("__CHANNEL__:{id}"), "version": version }),
+            );
+            let events = heard
+                .lock()
+                .expect("heard")
+                .iter()
+                .filter(|(channel, _)| *channel == id)
+                .count();
+            (answer, events)
+        };
+        // The next check, held from its start until the returned sender is
+        // used, when it answers `answer`.
+        let hold_next_check = |answer: Option<ScriptedPrevious>| {
+            let (started, has_started) = std::sync::mpsc::channel();
+            let (release, released) = std::sync::mpsc::channel();
+            asked.lock().expect("asked").held = Some(HeldPrevious {
+                answer,
+                started,
+                release: released,
+            });
+            (has_started, release)
+        };
+        let went_ahead = (Err(json!(NOT_VERIFIED)), 2);
+
+        std::thread::scope(|scope| {
+            // A late answer naming the same release, after the backup.
+            let (has_started, release) = hold_next_check(Some(named("1.0.0")));
+            let late = scope.spawn(check);
+            has_started.recv().expect("the first check started");
+            names(Some(named("1.0.0")));
+            assert_eq!(check(), "1.0.0");
+            assert!(back_up("1.0.0").is_ok());
+            release.send(()).expect("let it answer");
+            assert_eq!(late.join().expect("the late check"), "1.0.0");
+            assert_eq!(install("1.0.0"), went_ahead, "late same-version answer");
+
+            // A late answer of nothing (offline), after the backup.
+            let (has_started, release) = hold_next_check(None);
+            let late = scope.spawn(check);
+            has_started.recv().expect("the first check started");
+            assert_eq!(check(), "1.0.0");
+            assert!(back_up("1.0.0").is_ok());
+            release.send(()).expect("let it answer");
+            assert_eq!(late.join().expect("the late check"), Value::Null);
+            assert_eq!(install("1.0.0"), went_ahead, "late answer of nothing");
+        });
+
+        // A later check offering the same release keeps its backup.
+        assert_eq!(check(), "1.0.0");
+        assert_eq!(install("1.0.0"), went_ahead, "the same release again");
+
+        // The confirm dialog names 1.0.0; meanwhile a check finds 1.1.0.
+        names(Some(named("1.1.0")));
+        assert_eq!(check(), "1.1.0");
+        let saved = backups();
+        assert_eq!(back_up("1.0.0"), Err(json!(GO_BACK_CHANGED)));
+        assert_eq!(backups(), saved, "nothing saved");
+        assert_eq!(install("1.0.0"), (Err(json!(GO_BACK_CHANGED)), 0));
+        // 1.1.0 is offered afresh: it has no backup yet.
+        assert_eq!(install("1.1.0"), (Err(json!(NOT_BACKED_UP)), 0));
         assert!(!asked.lock().expect("asked").restarted);
     }
 
