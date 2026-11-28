@@ -47,6 +47,8 @@ mod path_tests;
 mod read_only_tests;
 #[cfg(test)]
 mod search_tests;
+#[cfg(test)]
+mod snapshot_tests;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 #[cfg(test)]

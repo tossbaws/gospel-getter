@@ -535,7 +535,7 @@ pub async fn findings_ready(conn: &mut SqliteConnection) -> anyhow::Result<bool>
 }
 
 /// Whether the reader has turned on "Let AI agents save findings" (C6).
-async fn enabled_on(conn: &mut SqliteConnection) -> anyhow::Result<bool> {
+pub(crate) async fn enabled_on(conn: &mut SqliteConnection) -> anyhow::Result<bool> {
     let value: Option<String> = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = $1")
         .bind(ENABLED_KEY)
         .fetch_optional(&mut *conn)
@@ -813,13 +813,22 @@ pub async fn list_findings(
 
 /// Every finding, in Bible order.
 pub async fn all_findings(pool: &SqlitePool) -> anyhow::Result<Vec<Finding>> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("Failed to read the findings")?;
+    all_findings_on(&mut conn).await
+}
+
+/// [`all_findings`] on `conn` (in a backup's snapshot, say).
+pub(crate) async fn all_findings_on(conn: &mut SqliteConnection) -> anyhow::Result<Vec<Finding>> {
     sqlx::query_as::<_, Finding>(concat!(
         "SELECT ",
         finding_columns!(),
         " FROM ai_findings",
         bible_order!()
     ))
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .context("Failed to read the findings")
 }

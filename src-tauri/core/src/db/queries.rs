@@ -13,7 +13,7 @@
 //! launch. Reading never changes a row: no translation's text is touched.
 
 use anyhow::Context;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::db::models::{Book, CrossReference, Translation, Verse};
 use crate::db::{WritePool, begin_write};
@@ -154,8 +154,19 @@ pub async fn get_chapter_verses(
 /// The last chapter read (translation, book, chapter), if the reader has
 /// ever actually read one.
 pub async fn get_reading_position(pool: &SqlitePool) -> anyhow::Result<Option<(i64, i64, i64)>> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("Failed to fetch reading position")?;
+    get_reading_position_on(&mut conn).await
+}
+
+/// [`get_reading_position`] on `conn` (in a backup's snapshot, say).
+pub(crate) async fn get_reading_position_on(
+    conn: &mut SqliteConnection,
+) -> anyhow::Result<Option<(i64, i64, i64)>> {
     sqlx::query_as("SELECT translation_id, book_id, chapter FROM reading_position WHERE id = 1")
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await
         .context("Failed to fetch reading position")
 }

@@ -6,12 +6,14 @@
 
 use anyhow::Context;
 use serde::Serialize;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use std::collections::{HashMap, HashSet};
 
-use crate::db::findings::{insert_findings, set_enabled_on};
-use crate::db::notes::{MAX_NOTE_CHARS, NoteLimit, NoteTotals, note_totals};
-use crate::db::{Bookmark, HighlightColor, NewFinding, WritePool};
+use crate::db::findings::{all_findings_on, enabled_on, insert_findings, set_enabled_on};
+use crate::db::highlights::list_highlights_on;
+use crate::db::notes::{MAX_NOTE_CHARS, NoteLimit, NoteTotals, list_notes_on, note_totals};
+use crate::db::queries::get_reading_position_on;
+use crate::db::{Bookmark, Finding, Highlight, HighlightColor, NewFinding, Note, WritePool};
 
 /// A bookmark ready to insert, after validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,11 +130,20 @@ pub struct NewPosition {
 
 /// Every bookmark, oldest first (the order they were made).
 pub async fn all_bookmarks(pool: &SqlitePool) -> anyhow::Result<Vec<Bookmark>> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("Failed to read bookmarks for export")?;
+    all_bookmarks_on(&mut conn).await
+}
+
+/// [`all_bookmarks`] on `conn` (in a backup's snapshot, say).
+pub(crate) async fn all_bookmarks_on(conn: &mut SqliteConnection) -> anyhow::Result<Vec<Bookmark>> {
     sqlx::query_as::<_, Bookmark>(
         "SELECT id, book_id, chapter, verse_start, verse_end, created_at FROM bookmarks \
          ORDER BY created_at, id",
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .context("Failed to read bookmarks for export")
 }
@@ -202,6 +213,67 @@ pub async fn now(pool: &SqlitePool) -> anyhow::Result<String> {
         .fetch_one(pool)
         .await
         .context("Failed to read the time")
+}
+
+/// Everything of the reader's a full backup holds, as the database had it
+/// at one moment: what [`snapshot`] reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReaderSnapshot {
+    /// Oldest first, as [`all_bookmarks`] lists them.
+    pub bookmarks: Vec<Bookmark>,
+    /// In Bible order, as [`list_highlights`](super::highlights::list_highlights)
+    /// lists them.
+    pub highlights: Vec<Highlight>,
+    /// In Bible order, as [`list_notes`](super::notes::list_notes) lists them.
+    pub notes: Vec<Note>,
+    /// In Bible order, as [`all_findings`](super::findings::all_findings) lists
+    /// them.
+    pub findings: Vec<Finding>,
+    /// Whether "Let AI agents save findings" is on.
+    pub findings_enabled: bool,
+    /// The last chapter read (translation, book, chapter), if any.
+    pub reading_position: Option<(i64, i64, i64)>,
+}
+
+/// The reader's bookmarks, highlights, notes, AI findings, findings switch
+/// and reading position, read on one of `pool`'s connections in one read
+/// transaction, so all six are the same moment of the database.
+///
+/// Read one pool call at a time, each could see a different moment: "Keep
+/// as mine" (`findings::keep_as_mine`) adds a note and removes its finding
+/// in one write, and committed between the notes and the findings it would
+/// leave a backup with neither. An import replacing every table, or any other
+/// write to more than one, could tear it the same way. With write-ahead
+/// logging, a plain (deferred) `BEGIN` on a read connection (`query_only`
+/// allows it) takes no lock, and its first read fixes what the rest see,
+/// while the writer carries on. The transaction ends here, before anything
+/// turns the records into a file.
+pub async fn snapshot(pool: &SqlitePool) -> anyhow::Result<ReaderSnapshot> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Failed to start reading the reader's data")?;
+    let bookmarks = all_bookmarks_on(&mut tx).await?;
+    let highlights = list_highlights_on(&mut tx).await?;
+    let notes = list_notes_on(&mut tx).await?;
+    // Between the two tables "Keep as mine" writes (see above): the tests
+    // stop here and commit one (`db::snapshot_tests`).
+    #[cfg(test)]
+    super::snapshot_tests::between_notes_and_findings().await;
+    let findings = all_findings_on(&mut tx).await?;
+    let findings_enabled = enabled_on(&mut tx).await?;
+    let reading_position = get_reading_position_on(&mut tx).await?;
+    tx.commit()
+        .await
+        .context("Failed to finish reading the reader's data")?;
+    Ok(ReaderSnapshot {
+        bookmarks,
+        highlights,
+        notes,
+        findings,
+        findings_enabled,
+        reading_position,
+    })
 }
 
 /// A format 4 file's AI findings and switch, to import.

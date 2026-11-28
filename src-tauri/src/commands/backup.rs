@@ -12,7 +12,7 @@ use super::{
     write_atomically, write_new_atomically,
 };
 use crate::db::notes::grouped;
-use crate::db::reader_data::{ApplyImportError, FindingsImport, ImportCounts};
+use crate::db::reader_data::{ApplyImportError, FindingsImport, ImportCounts, ReaderSnapshot};
 use crate::db::{self, NoteLimit};
 use crate::passage_reference::passage_reference;
 use crate::reader_data::{
@@ -220,16 +220,21 @@ fn passage_reference_for(state: &AppState, b: &NewBookmark) -> String {
 /// and then it always says whether the switch is on or off, so restoring it
 /// puts the switch back either way. Otherwise format 3, which 2.8.0 to
 /// 2.25.x restore: it can't hold the switch, which is off.
+///
+/// All of it is one moment of the database (`db::reader_data::snapshot`
+/// says why). Export data… and Go back's backup both build their file here.
 pub async fn build_reader_data(
     state: &AppState,
     preferences: Preferences,
 ) -> anyhow::Result<ReaderData> {
-    let bookmarks = state.store.all_bookmarks().await?;
-    let highlights = state.store.highlights().await?;
-    let notes = state.store.notes().await?;
-    let findings = state.store.findings().await?;
-    let findings_enabled = state.store.findings_enabled().await?;
-    let position = state.store.reading_position().await?;
+    let ReaderSnapshot {
+        bookmarks,
+        highlights,
+        notes,
+        findings,
+        findings_enabled,
+        reading_position: position,
+    } = state.store.reader_snapshot().await?;
     let reading_position = position.and_then(|(translation_id, book_id, chapter)| {
         let translation = state.translations.iter().find(|t| t.id == translation_id)?;
         Some(PositionRecord {
