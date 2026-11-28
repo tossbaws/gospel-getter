@@ -33,7 +33,9 @@
 //! database, the version left behind is skipped, and the release is
 //! downloaded, verified and installed as Update now does, with the same
 //! progress (in About, and the banner if About closes). A failed backup
-//! stops it there: nothing is installed.
+//! stops it there: nothing is installed. Both steps name the version the
+//! dialog named, and the backend refuses them if it offers another by
+//! then.
 //!
 //! Each event writes the DOM within itself (the views, the status lines,
 //! focus), then any command it starts runs on; the frontend tests look at
@@ -130,6 +132,9 @@ pub struct Updates {
     previous: StoredValue<Option<PreviousInfo>>,
     /// The release being gone back to, while it is.
     going_back: StoredValue<Option<String>>,
+    /// The release the confirm dialog names, while it's open: the one
+    /// going back installs, though a check may offer another meanwhile.
+    confirming: StoredValue<Option<String>>,
     /// About has shown it (after which the banner stays away).
     shown_in_about: StoredValue<bool>,
     /// The app's version, as `get_app_version` read it (none if it
@@ -206,6 +211,7 @@ impl Updates {
             offered: StoredValue::new(None),
             previous: StoredValue::new(None),
             going_back: StoredValue::new(None),
+            confirming: StoredValue::new(None),
             shown_in_about: StoredValue::new(false),
             version,
             progress: StoredValue::new_local(None),
@@ -442,7 +448,8 @@ impl Updates {
     /// Checks for an update: quietly at launch (nothing is said, whatever
     /// happens), or for Check now, which says how it went. What the reader
     /// sees changes at once; the check runs on. Check now stays disabled
-    /// until no check is on its way, the quiet one included.
+    /// until no check is on its way, the quiet one included, and a check is
+    /// on its way until Go back's release is in too.
     pub fn check(self, quiet: bool) {
         if self.going_back.with_value(Option::is_some) {
             return;
@@ -473,6 +480,11 @@ impl Updates {
                     }
                 }
             }
+            // Go back's release, quietly, once the update's answer is in.
+            let previous =
+                ipc::invoke::<Option<PreviousInfo>>("check_previous_version", JsValue::UNDEFINED)
+                    .await;
+            self.show_previous(previous.ok().flatten());
             let running = self.checks.try_update_value(|n| {
                 *n = n.saturating_sub(1);
                 *n
@@ -483,11 +495,6 @@ impl Updates {
             {
                 button.set_disabled(false);
             }
-            // Go back's release, quietly, once the update's answer is in.
-            let previous =
-                ipc::invoke::<Option<PreviousInfo>>("check_previous_version", JsValue::UNDEFINED)
-                    .await;
-            self.show_previous(previous.ok().flatten());
         });
     }
 
@@ -732,6 +739,7 @@ impl Updates {
         let Some(version) = self.previous_to_offer() else {
             return;
         };
+        self.confirming.set_value(Some(version.clone()));
         set_text(
             self.confirm_title.get_untracked(),
             &update_text::go_back_title(&version),
@@ -798,7 +806,10 @@ impl Updates {
         if self.installing.get_value() {
             return;
         }
-        let Some(version) = self.previous_to_offer() else {
+        if self.previous_to_offer().is_none() {
+            return;
+        }
+        let Some(version) = self.confirming.get_value() else {
             return;
         };
         self.installing.set_value(true);
@@ -825,6 +836,11 @@ impl Updates {
                 &args,
                 &JsValue::from_str("preferences"),
                 &crate::aa::current(),
+            );
+            let _ = js_sys::Reflect::set(
+                &args,
+                &JsValue::from_str("version"),
+                &JsValue::from_str(&version),
             );
             match ipc::invoke::<BackupSaved>("save_backup_before_going_back", args.into()).await {
                 Ok(saved) => {
@@ -861,6 +877,11 @@ impl Updates {
             };
             let args = js_sys::Object::new();
             let _ = js_sys::Reflect::set(&args, &JsValue::from_str("onEvent"), &channel);
+            let _ = js_sys::Reflect::set(
+                &args,
+                &JsValue::from_str("version"),
+                &JsValue::from_str(&version),
+            );
             if let Err(e) = ipc::invoke_value("install_previous_version", args.into()).await {
                 self.go_back_failed(&e);
             }
