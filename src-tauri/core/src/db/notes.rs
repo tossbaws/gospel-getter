@@ -6,7 +6,7 @@
 //! table in `migrate/schema_2.rs`.
 
 use anyhow::Context;
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteConnection, SqlitePool};
 use std::cmp::Ordering;
 use std::fmt;
 
@@ -522,8 +522,14 @@ pub async fn note_places(pool: &SqlitePool) -> anyhow::Result<Vec<NotePlace>> {
 
 /// Every note, in Bible order (see `in_bible_order`).
 pub async fn list_notes(pool: &SqlitePool) -> anyhow::Result<Vec<Note>> {
+    let mut conn = pool.acquire().await.context("Failed to read notes")?;
+    list_notes_on(&mut conn).await
+}
+
+/// [`list_notes`] on `conn` (in a backup's snapshot, say).
+pub(crate) async fn list_notes_on(conn: &mut SqliteConnection) -> anyhow::Result<Vec<Note>> {
     let all = sqlx::query_as::<_, Note>(concat!("SELECT ", note_columns!(), " FROM notes"))
-        .fetch_all(pool)
+        .fetch_all(&mut *conn)
         .await
         .context("Failed to read notes")?;
     Ok(in_bible_order(all))

@@ -5,7 +5,7 @@
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteConnection, SqlitePool};
 use std::fmt;
 use std::str::FromStr;
 
@@ -155,11 +155,19 @@ pub async fn remove_highlights(
 
 /// Every highlight, in Bible order.
 pub async fn list_highlights(pool: &SqlitePool) -> anyhow::Result<Vec<Highlight>> {
+    let mut conn = pool.acquire().await.context("Failed to read highlights")?;
+    list_highlights_on(&mut conn).await
+}
+
+/// [`list_highlights`] on `conn` (in a backup's snapshot, say).
+pub(crate) async fn list_highlights_on(
+    conn: &mut SqliteConnection,
+) -> anyhow::Result<Vec<Highlight>> {
     sqlx::query_as::<_, Highlight>(
         "SELECT book_id, chapter, verse, color, created_at, updated_at FROM highlights \
          ORDER BY book_id, chapter, verse",
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .context("Failed to read highlights")
 }

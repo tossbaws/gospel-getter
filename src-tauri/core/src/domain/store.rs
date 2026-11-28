@@ -306,6 +306,12 @@ impl Store {
         db::search::search_verses(self.db.read(), translation_id, query, limit, offset).await
     }
 
+    /// The reader's data a full backup holds, read as one moment of the
+    /// database (`db::reader_data::snapshot`).
+    pub async fn reader_snapshot(&self) -> anyhow::Result<db::reader_data::ReaderSnapshot> {
+        db::reader_data::snapshot(self.db.read()).await
+    }
+
     /// Every bookmark, oldest first, for export.
     pub async fn all_bookmarks(&self) -> anyhow::Result<Vec<Bookmark>> {
         db::reader_data::all_bookmarks(self.db.read()).await

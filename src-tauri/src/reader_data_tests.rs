@@ -2591,6 +2591,24 @@ async fn a_backup_is_format_4_only_with_findings_or_the_switch_on() {
     );
     // The notes, bookmarks and highlights are as format 3 has them.
     assert_eq!(found["notes"], plain["notes"]);
+
+    commands::set_findings_switch(&state, true).await.unwrap();
+    let both = json(&build_reader_data(&state, matrix_prefs()).await.unwrap());
+    assert_eq!(both["format_version"], 4);
+    assert_eq!(both["ai_findings_enabled"], true);
+    assert_eq!(both["findings"], found["findings"]);
+
+    // The finding kept as the reader's note, and the switch off: no
+    // findings left, so format 3 again.
+    commands::set_findings_switch(&state, false).await.unwrap();
+    let finding = state.store.findings().await.unwrap().remove(0);
+    commands::finding_keep(&state, finding.id, &finding.created_at, "Kept.")
+        .await
+        .unwrap();
+    let kept = json(&build_reader_data(&state, matrix_prefs()).await.unwrap());
+    assert_eq!(kept["format_version"], 3);
+    assert!(kept.get("findings").is_none() && kept.get("ai_findings_enabled").is_none());
+    assert_eq!(kept["notes"].as_array().map(Vec::len), Some(2));
     drop(db);
 }
 
@@ -3300,6 +3318,70 @@ async fn a_backup_holds_what_changed_while_its_dialog_was_open() {
             .await
             .unwrap();
     assert!(matches!(cancelled, ExportOutcome::Cancelled));
+}
+
+/// A finding is in a full backup once, whether it's still a finding or the
+/// reader's note "Keep as mine" made of it: Export data… before the keep and
+/// Go back's backup after it each restore, through the real importer into a
+/// new install, exactly one of the two. The race the snapshot settles, a
+/// keep committed while a backup is read, is played out in core
+/// (`db::snapshot_tests`); both kinds of backup read that snapshot through
+/// `build_reader_data`.
+#[tokio::test]
+async fn a_kept_finding_is_in_a_backup_once_and_restores_once() {
+    let (db, state) = app("rd_keep_once").await;
+    add_finding(&state, 11, 35, "grief").await;
+    let exported = file(&db, "before-keeping.gospel-getter.json");
+    commands::export_reader_data_with(&state, Preferences::default(), |_| {
+        let path = exported.clone();
+        async move { Ok(Some(path)) }
+    })
+    .await
+    .unwrap();
+
+    let finding = state.store.findings().await.unwrap().remove(0);
+    commands::finding_keep(&state, finding.id, &finding.created_at, "Jesus wept.")
+        .await
+        .unwrap();
+    let folder = db.path().parent().unwrap().to_path_buf();
+    let backed_up = commands::save_backup_before(&state, Preferences::default(), &folder, "2.35.0")
+        .await
+        .unwrap();
+    let kept = (43, 11, 35, 35, "Jesus wept.".to_string());
+    assert_eq!(note_texts(&state).await, std::slice::from_ref(&kept));
+    assert!(finding_rows(&state).await.is_empty());
+
+    let found = vec![(
+        43,
+        11,
+        35,
+        35,
+        "Claude".to_string(),
+        "grief".to_string(),
+        finding.created_at.clone(),
+    )];
+    for (path, label, format, findings, notes) in [
+        (&exported, "rd_keep_once_export", 4, found, Vec::new()),
+        (
+            &backed_up,
+            "rd_keep_once_go_back",
+            3,
+            Vec::new(),
+            vec![kept],
+        ),
+    ] {
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(written["format_version"], format, "{}", path.display());
+        let (_fresh_db, fresh) = app(label).await;
+        import(&fresh, path, false).await;
+        assert_eq!(
+            (finding_rows(&fresh).await, note_texts(&fresh).await),
+            (findings, notes),
+            "{}",
+            path.display()
+        );
+    }
+    let _ = std::fs::remove_file(&backed_up);
 }
 
 /// A backup with the reader's records on the verse numbers 2.29.2's KJV no
