@@ -926,12 +926,17 @@
 
 /* ---------- Questions ---------- */
 
+/* clip, not the .pane's hidden: hidden makes the pane a scroll container, and the
+   sticky heading would then stick to the pane instead of following the page. */
 .faq-head {
     grid-column: 1 / 5;
-    align-self: start;
-    position: sticky;
-    top: var(--edge);
     min-height: 16rem;
+    overflow: clip;
+}
+
+.faq-head h2 {
+    position: sticky;
+    top: calc(var(--edge) + var(--pad));
 }
 
 .faq-list {
@@ -1367,8 +1372,11 @@
     }
 
     .faq-head {
-        position: static;
         min-height: 0;
+    }
+
+    .faq-head h2 {
+        position: static;
     }
 
     /* Clear of the pane above, so its last line never reads as a label over the heading. */
